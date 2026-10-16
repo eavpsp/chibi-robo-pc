@@ -89,15 +89,6 @@ bool host_init(const HostConfig& config) {
                     kWindowModes[config.windowMode >= 0 && config.windowMode <= 2 ? config.windowMode : 0]);
   // Rendering at the EFB resolution (exact logical height, width stretched to the window's 4:3, like
   // a console's picture on a TV set): AURORA_VIEWPORT_STRETCH + scale 1.
-<<<<<<< HEAD
-  const GcrtGameConfig* gc = gcrt_game_config();
-  float renderScale = config.renderScale;
-  if (config.windowMode == 0) { // direct launch only: automated runs keep their settings
-  gcrt_game_config_load();
-  if (!gcrt_game_config_run_menu(g_title.c_str())) {
-    aurora_shutdown(); // window closed from the menu: abort the boot
-    return false;
-=======
   float renderScale = config.renderScale;
   if (config.setupMenu) { // a player's direct launch only: automated runs keep their settings
     // Setup menu (gcrt_game_config.h): window size, fullscreen and render scale, saved in the user folder.
@@ -118,21 +109,7 @@ bool host_init(const HostConfig& config) {
   if (renderScale > 0.0f) {
     AuroraSetViewportPolicy(config.viewportFit ? AURORA_VIEWPORT_FIT : AURORA_VIEWPORT_STRETCH);
     VISetFrameBufferScale(renderScale);
->>>>>>> f4e94769907bc842d05f21e2da966de5735fda48
   }
-  const GcrtGameConfig* gc = gcrt_game_config();
-  renderScale = gc->renderScale;
-  if (info.window != nullptr) {
-    SDL_SetWindowFullscreen(info.window, gc->fullscreen);
-    if (!gc->fullscreen) {
-      SDL_SetWindowSize(info.window, gc->windowWidth, gc->windowHeight);
-    }
-  }
-}
-if (renderScale > 0.0f) {
-  AuroraSetViewportPolicy(config.viewportFit ? AURORA_VIEWPORT_FIT : AURORA_VIEWPORT_STRETCH);
-  VISetFrameBufferScale(renderScale);
-}
   // Aurora's PAD: opening of SDL gamepads, port assignment, rumble. The mappings
   // (keyboard, buttons, axes, dead zones) come from controls.ini (input_host.cpp), not from Aurora.
   PADInit();
