@@ -51,6 +51,10 @@
  *   GCRT_COPY_FILTER   filter and gamma of the display copy: unblended (default, like Dolphin:
  *                      coefficients carried over to the current line) | full (vertical filter of the
  *                      console) | off (neither filter nor gamma)
+ *   GCRT_EFB_HEIGHT    "console" (default): Aurora's logical EFB has the console's 528 lines, the display copy's
+ *                      rectangle being the only part presented, captured and filtered (lines below it: shadow maps
+ *                      and other EFB -> texture copies); "display": the EFB has the display copy's height
+ *                      (former behaviour: a copy reaching below it is clipped, then stretched)
  *   GCRT_RTC           fixed clock: seconds since January 1st, 2000 at startup (reproducibility)
  *   GCRT_INPUT         scripted inputs of port 0: "t:BUTTONS[:duration]" separated by ";",
  *                      BUTTONS = A, B, X, Y, Z, L, R, START, UP, DOWN, LEFT, RIGHT joined by "+"
@@ -66,7 +70,11 @@
  *                      the N-th safe write of a save (platform/gcrt_save_file.h)
  *   GCRT_HW_COUNT_FILE hardware access counter in JSON at the end (also --hw-count); a "hardware
  *                      accesses" line is written to the trace at each report
- *   GCRT_FORCE_ARG     diagnostic: "ADDRESS:rN=VALUE" forces a register on entry to a function (hle)
+ *   GCRT_FORCE_ARG     diagnostic: "ADDRESS:rN=VALUE" forces a register on entry to a function,
+ *                      "ADDRESS:[rN+OFFSET]=VALUE" or "ADDRESS:[ABSOLUTE]=VALUE" a 32-bit word of guest memory;
+ *                      "&=" / "|=" instead of "=" for a read-modify-write; "ADDRESS@RETURN:" acts only on the
+ *                      entries whose return address is RETURN; "#COUNT" at the end: first COUNT (matching)
+ *                      entries only; items separated by ";" (hle/os_report.c)
  *   GCRT_WATCH         addresses (hex) whose passes at block start are counted (e.g. "80001234,80005678")
  *   GCRT_GX_STALE_COPIES "evict" (default): an EFB -> texture copy whose guest memory the game has rewritten since
  *                      is dropped and the texture is read from memory, like the console; "keep": former behavior

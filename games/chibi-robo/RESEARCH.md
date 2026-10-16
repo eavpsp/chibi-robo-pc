@@ -332,6 +332,32 @@ The 16 modules are stored in `qp.bin` under `rel/` `[verified: file]`:
 
 **Frame interval**, vtable +`0x28` `[verified: Ghidra, both versions]`. It returns 1 if the word at `CGame`+`0x472C` is between 1 and 14, or if the word at `CGame`+`0x4930` is between 1 and 22; otherwise 2. The game runs at 30 frames per second, and at 60 while one of these fields is in range. Dolphin's "60 FPS" patch replaces the last instruction before the return (US `0x8000A518` / PAL `0x8000A538`) so that the function always returns 1 `[verified: Ghidra + Dolphin's GameSettings files]`.
 
+
+### Stages and save restore
+
+PAL addresses were found by masked instruction matching against US, then confirmed by runs.
+- A stage N loads `bin/e/stageNN.bin` from `qp.bin` and, when it exists, `rel/stageNN.rel` `[verified: DVD trace
+  matched against qp.bin, US and PAL]`. Normal stages are numbered 0 to 29 (numbering as in
+  [unplug](https://github.com/adierking/unplug), MIT). Stage 0 is a developers' scene where each character opens a
+  menu of story points that warps to the matching stage; stage 9 is the backyard; stage 14 is the living room during
+  the birthday party `[verified: runs and screenshots, US and PAL, for stages 0, 9 and 14]`.
+- **Stage change**, US `0x8000B394` `(game object, int stage, int mode)` `[verified: Ghidra + runs, US]`. `stage` is
+  a stage number, or a code: 10000 = start stage, 20000 = the stage stored in the save (it also requests the save
+  restore), negative = next stage. It writes the current stage at game object `+0x3444` and the previous one at
+  `+0x3448`. PAL: `0x8000B3B4` (60 of its first 64 instructions match), current stage at `+0x344C`; the codes were
+  not observed at run time on PAL.
+- **Loading a save** calls the stage change with 20000 from US `0x80030C48` / PAL `0x8003158C` `[verified: GCRT_WATCH
+  counters (US), runs (PAL)]`.
+- **Save restore**, US `0x80087CC0` / PAL `0x80089C1C`, called only from US `0x80012704` / PAL `0x80012864`
+  `[verified: Ghidra (US), runs (US and PAL)]`. It reads the stage stored at save offset `+0xC408` (same offset on
+  both versions), copies the current stage into the previous one, writes the stored stage as the current one, then
+  restores the counters, the battery and other blocks of the save.
+- Right after that call, the caller sets bit `0x2000` in a flags word of the game object (US `+0x1B14`, PAL
+  `+0x1B1C`). While it is set, the stage being entered places Chibi-Robo at the spot where the save was made; with
+  the bit cleared, Chibi-Robo appears at the stage's own starting point `[verified: runs, US and PAL]`. Which code
+  reads the bit is not established.
+- The game object is a single instance at US `0x8025C400` / PAL `0x80263000` (`CGame` above).
+
 ---
 
 ## 9. Threads, alarms, interrupts and busy-waits
@@ -455,7 +481,12 @@ THPSimple and the game each add their own AI DMA callback in front of AX's.
 - In 3D gameplay (US, living room at night, frame dump of the GX stream), each frame has two EFB-to-texture copies `[verified: trace]`:
   - at the start of the frame, a few fan and strip draws, then a copy of the red channel (`GX_CTF_R8`, source 640x480, with clear); later draws of the same frame sample that destination as an `I8` 640x480 texture (22 loads in the traced frame);
   - at the end of the frame, a copy of the alpha channel (`GX_CTF_A8`, 640x448, without clear), sampled as `I8` right after.
-  The source of the red-channel copy (480 lines) is taller than the display copy (448 lines on US).
+  The source of the red-channel copy (480 lines) is taller than the display copy (448 lines on US). This red-channel
+  copy is the shadow map: an orthographic pass in a 640x480 viewport, sampled by the floors in their own draw. A
+  renderer whose EFB is only as tall as the US display copy (448 lines) cuts and stretches it, which moves the
+  shadows; the EFB must keep the console's 528 lines `[verified: GX stream, shadow positions predicted from the
+  stream's matrices and measured, comparison with Dolphin]`. On PAL the display copy already reads the full
+  640x528 EFB.
 - The CPU never reads or writes the EFB `[verified: Ghidra]`.
 
 **Synchronisation** `[verified: Ghidra + trace]`:
