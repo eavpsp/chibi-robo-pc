@@ -40,10 +40,22 @@
  *                      GCRT_AUDIO_WAV or ./audio.wav) | off (no sound)
  *   GCRT_WINDOW        normal (default) | background (shown without taking the foreground) |
  *                      minimized: for automated runs
- *   GCRT_SETUP_MENU    setup menu before the game (window size, fullscreen, render scale; platform/gcrt_game_config.h):
+ *   GCRT_NO_FOCUS      1: "no focus" test mode, for launches on a computer someone is using (platform/gcrt_focus.h;
+ *                      tools/run.py sets it unless the caller did): the game window is never activated nor raised
+ *                      (shown without activation, "normal" counting as "background"; minimized if GCRT_WINDOW=minimized),
+ *                      the menu's fullscreen setting is not applied, a console opened by the console option is created
+ *                      minimized without activation, the foreground is never handed to the game window, and Shift
+ *                      held at launch no longer shows a skipped setup menu. Default 0
+ *   GCRT_SETUP_MENU    setup menu before the game (window size, fullscreen, render scale, console; gcrt_game_config.h):
  *                      auto (default): on a direct launch only, i.e. none of GCRT_WINDOW, GCRT_USER_DIR, GCRT_INPUT,
- *                      GCRT_INPUT_FRAMES, GCRT_STOP_AT, GCRT_STOP_FRAME, GCRT_CAPTURE_DIR, GCRT_RTC is set; 1 always; 0 never.
+ *                      GCRT_INPUT_FRAMES, GCRT_STOP_AT, GCRT_STOP_FRAME, GCRT_CAPTURE_DIR, GCRT_RTC, GCRT_NO_FOCUS is set;
+ *                      1 always; 0 never.
  *                      When the menu is used, its render scale replaces GCRT_RENDER_SCALE
+ *   GCRT_SETUP_MENU_AUTO diagnostic, for tests without keyboard or foreground: start | close, optionally ":N".
+ *                      After N passes of the menu loop (default 10; one pass = one menu frame, or 16 ms while the
+ *                      window is minimized), acts as if "Start game" were pressed (with the current box values: the
+ *                      saved file, or --console / --no-console) or as if the window were closed. No effect when the
+ *                      menu is not shown
  *   GCRT_STOP_AT       stop requested when the emulated time reaches this value (seconds)
  *   GCRT_RENDER_SCALE  rendering resolution in multiples of the EFB (default 1 = console; 0 = window)
  *   GCRT_VIEWPORT      stretch (default: 4:3 width of the window) | fit (diagnostic: EFB rendered
@@ -79,6 +91,16 @@
  *   GCRT_GX_STALE_COPIES "evict" (default): an EFB -> texture copy whose guest memory the game has rewritten since
  *                      is dropped and the texture is read from memory, like the console; "keep": former behavior
  *                      (Aurora keeps binding the copy); counted in the final GX report (gx/gx_bridge.hpp)
+ *   GCRT_GX_FREEZE     "1" (default): the bridge gives Aurora's thread copies, taken when the game emits the command,
+ *                      of the data passed by pointer (vertex arrays, textures, TLUTs), so rendering no longer depends
+ *                      on when that thread runs; "0": no vertex array or texture copies, Aurora reads that guest memory itself
+ *                      (diagnostic; TLUTs are still copied at every load, so not the behavior before the fix).
+ *                      Counted in the final report ("GX frozen copies") (gx/gx_bridge.hpp)
+ *   GCRT_GX_FREEZE_CHECK diagnostic: "1" compares, at every draw, the copies Aurora holds for the arrays and texture
+ *                      maps the draw reads with guest memory; differences counted and the first 200 traced
+ *                      ("GX frozen check", platform category)
+ *   GCRT_GX_PUBLISH_BATCH draws published to Aurora's thread per wake-up, 1 to 4096 (default 128; 1 with
+ *                      GCRT_GX_FREEZE=0)
  *   GCRT_GX_STREAM     diagnostic: fingerprint of the received GX command stream, one line per frame ("frame bytes
  *                      fnv64 draws") in this file; "1" = gx-stream.txt in GCRT_CAPTURE_DIR. GCRT_GX_STREAM_DUMP:
  *                      frames ("12,500") whose full stream is also written (<file>.<frame>.bin)

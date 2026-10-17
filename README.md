@@ -43,7 +43,8 @@ Install yourself: Git, Python 3.11+ (the `py` launcher), CMake 3.25+, and Visual
 "Desktop development with C++" workload (Windows SDK and runtime libraries).
 
 Optional: Dolphin. It is only used to compare the port with the original behavior (`tools/dolphin_ref.py`), and
-its DolphinTool only to convert disc images that are not plain `.iso` / `.gcm` files.
+its DolphinTool only to convert disc images that are not plain `.iso` / `.gcm` files. `tools/dolphin_ref.py` runs
+Dolphin on a separate, never-shown Windows desktop, so a reference run never takes the foreground or your keystrokes.
 
 Installed automatically into `external/` by `tools/bootstrap.py`: clang/LLVM, Ninja, Ghidra, a JDK 21, the
 GameCube loader for Ghidra, DolRecomp and Aurora.
@@ -90,6 +91,14 @@ it). The choices are
 saved in `game_config.ini` in the same folder as `controls.ini` (see below). Tick "Skip this menu next time"
 to start the game directly; hold Shift while the game starts to show the menu again, or set `skipMenu=0` in
 `game_config.ini`. Values outside the menu's choices fall back to the defaults.
+
+The game no longer opens a console window by itself. "Show console" (checked by default) opens one with the game's
+log when the game starts, never while the menu is up; the output written before that moment is shown in it. If the
+game was launched from a terminal, it prints in that terminal instead of a new window (Windows does not wait for it,
+so the output follows the prompt). The choice is saved as `console=1` or `console=0` in
+`game_config.ini`; with "Skip this menu next time", the saved value applies. `--console` and `--no-console` decide
+for one launch only: the box starts checked or unchecked and the file is changed only if you toggle the box. When the
+output is redirected (to a file or a pipe, as `tools/run.py` and the test benches do), no console is ever opened.
 
 ### Controls
 

@@ -9,6 +9,7 @@
 #include <dolphin/pad.h>
 #include <dolphin/vi.h>
 
+#include <SDL3/SDL_events.h>
 #include <SDL3/SDL_hints.h>
 #include <SDL3/SDL_scancode.h>
 #include <SDL3/SDL_video.h>
@@ -21,6 +22,7 @@
 
 extern "C" {
 #include "trace.h"
+#include "gcrt_focus.h"
 #include "gcrt_game_config.h"
 }
 
@@ -101,8 +103,14 @@ bool host_init(const HostConfig& config) {
     const GcrtGameConfig* gc = gcrt_game_config();
     renderScale = gc->renderScale;
     if (info.window != nullptr) {
-      SDL_SetWindowFullscreen(info.window, gc->fullscreen);
-      if (!gc->fullscreen) {
+      // "No focus" test mode (gcrt_focus.h): a fullscreen window would cover the screen of the person using the
+      // computer, so the window keeps the menu's window size instead.
+      const bool fullscreen = gc->fullscreen && !gcrt_no_focus();
+      if (fullscreen != gc->fullscreen) {
+        gcrt_trace_printf(GCRT_TRACE_PLATFORM, "fullscreen not applied (GCRT_NO_FOCUS)");
+      }
+      SDL_SetWindowFullscreen(info.window, fullscreen);
+      if (!fullscreen) {
         SDL_SetWindowSize(info.window, gc->windowWidth, gc->windowHeight);
       }
     }
@@ -136,10 +144,22 @@ bool host_poll_events() {
   while (ev != nullptr && ev->type != AURORA_NONE) {
     if (ev->type == AURORA_EXIT) {
       keepRunning = false;
+    } else if (ev->type == AURORA_WINDOW_RESIZED || ev->type == AURORA_DISPLAY_SCALE_CHANGED) {
+      const AuroraWindowSize& s = ev->windowSize;
+      gcrt_trace_printf(GCRT_TRACE_PLATFORM, "window %s: %ux%u, frame buffer %ux%u, surface %ux%u, scale %.2f",
+                        ev->type == AURORA_WINDOW_RESIZED ? "resized" : "display scale changed", s.width, s.height,
+                        s.fb_width, s.fb_height, s.native_fb_width, s.native_fb_height, static_cast<double>(s.scale));
     }
     ++ev;
   }
   return keepRunning;
+}
+
+bool host_pump_events() {
+  // Window messages only (the window keeps answering Windows, keyboard state up to date); the SDL events stay queued
+  // for the next host_poll_events. A close request is seen without being consumed.
+  SDL_PumpEvents();
+  return !SDL_HasEvent(SDL_EVENT_QUIT) && !SDL_HasEvent(SDL_EVENT_WINDOW_CLOSE_REQUESTED);
 }
 
 double host_wait_pipelines(double timeoutSeconds) {

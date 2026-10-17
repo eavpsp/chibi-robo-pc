@@ -28,7 +28,10 @@
 
 extern "C" {
 #include "../hle/gcrt_native.h"
+#include "gcrt_console.h"
+#include "gcrt_focus.h"
 #include "gcrt_crash.h"
+#include "gcrt_game_config.h"
 #include "gcrt_user_dir.h"
 #include "trace.h"
 }
@@ -390,6 +393,22 @@ void open_frame(GcrtPlatform* p) {
   }
 }
 
+void on_window_closed(GcrtPlatform* p) {
+  if (!p->stopRequested) {
+    p->stopRequested = true;
+    gcrt_trace_printf(GCRT_TRACE_PLATFORM, "window closed: stop requested");
+    gcrt_cpu_request_stop(p->g);
+  }
+}
+
+// Aurora's window events (aurora_update), with no Aurora frame open: a resize recreates the frame buffer and clears
+// the bind group cache, which the draws of an open frame still refer to (hang on resize, issue 21).
+void poll_window(GcrtPlatform* p) {
+  if (!gcrt::platform::host_poll_events()) {
+    on_window_closed(p);
+  }
+}
+
 // Video fields and vertical retraces of the native VI (hle/native_vi.c).
 uint64_t vi_fields(GcrtPlatform*) { return gcrt_native_vi_fields(); }
 
@@ -509,6 +528,8 @@ void on_display_copy(void* user, const gcrt::gx::DisplayCopyInfo& info) {
   } else {
     ++p->framesSkipped;
   }
+  // Between two frames: the only safe point for Aurora's window events (resize, display scale, close).
+  poll_window(p);
   open_frame(p);
 }
 
@@ -662,12 +683,14 @@ void on_field(void* user, uint32_t, uint32_t, bool) {
   pace(p, now);
   p->input.now = now;
   p->input.fields = vi_fields(p);
-  if (!gcrt::platform::host_poll_events() && !p->stopRequested) {
-    p->stopRequested = true;
-    gcrt_trace_printf(GCRT_TRACE_PLATFORM, "window closed: stop requested");
-    gcrt_cpu_request_stop(p->g);
-  }
-  if (!p->frameOpen) {
+  // Window events: processed by Aurora only between two frames (poll_window); while a frame is open, the window
+  // messages are only pumped, and the events wait for the next display copy (issue 21: resize during a frame).
+  if (p->frameOpen) {
+    if (!gcrt::platform::host_pump_events()) {
+      on_window_closed(p);
+    }
+  } else {
+    poll_window(p);
     open_frame(p);
   }
   if (p->stopAt > 0.0 && now >= p->stopAt && !p->stopRequested) {
@@ -859,6 +882,9 @@ extern "C" GcrtPlatform* gcrt_platform_attach(GcrtCpu* g, const char* title, con
   {
     const std::string window = env("GCRT_WINDOW", "normal");
     host.windowMode = window == "background" ? 1 : window == "minimized" ? 2 : 0;
+    if (gcrt_no_focus() && host.windowMode == 0) {
+      host.windowMode = 1; // "no focus" test mode (gcrt_focus.h): never activated, at least shown in the background
+    }
   }
   host.viewportFit = env("GCRT_VIEWPORT", "stretch") == "fit";
   {
@@ -887,6 +913,16 @@ extern "C" GcrtPlatform* gcrt_platform_attach(GcrtCpu* g, const char* title, con
     gcrt_trace_printf(GCRT_TRACE_PLATFORM, "window closed from the setup menu: exit");
     std::fflush(nullptr);
     std::exit(0);
+  }
+  // Console window (gcrt_console.h), opened or not now that the game starts. With the setup menu: its box (or the saved
+  // value when the menu is skipped), in which --console / --no-console already set this launch's value. Without the
+  // menu (automated launches): those options, otherwise the console of the parent process only (a launch from a
+  // terminal prints there, like the former console program). Nothing happens when the parent redirected the output.
+  if (host.setupMenu) {
+    gcrt_console_start(gcrt_game_config()->console ? GCRT_CONSOLE_OPEN : GCRT_CONSOLE_NONE);
+  } else {
+    const int request = gcrt_console_request();
+    gcrt_console_start(request == 1 ? GCRT_CONSOLE_OPEN : request == 0 ? GCRT_CONSOLE_NONE : GCRT_CONSOLE_PARENT);
   }
   // Crash reports of a direct launch go to the user folder (runs set GCRT_CAPTURE_DIR or GCRT_CRASH_DIR first).
   if (const char* userDir = gcrt_user_dir(); userDir != nullptr && userDir[0] != '\0') {
@@ -998,6 +1034,19 @@ extern "C" void gcrt_platform_detach(GcrtPlatform* p) {
                     static_cast<unsigned long long>(p->pendingAtCopy), static_cast<unsigned long long>(p->pendingAtFrameEnd),
                     static_cast<unsigned long long>(p->filteredFrames),
                     static_cast<unsigned long long>(gx.copyTextureLoads), static_cast<unsigned long long>(gx.staleCopies));
+  // Frozen copies of the data passed by pointer to Aurora's thread (gx/gx_bridge.hpp, rendering race).
+  gcrt_trace_printf(GCRT_TRACE_PLATFORM,
+                    "GX frozen copies %s, publish batch %u: textures %llu copies (%.1f MiB), %llu unchanged; arrays "
+                    "%llu copies (%.1f MiB), %llu unchanged; TLUTs %llu; epochs: textures %llu, arrays %llu; peak "
+                    "held %.1f MiB, held at the last drain %.1f MiB; outdated at a draw (GCRT_GX_FREEZE_CHECK) %llu",
+                    p->bridge.freeze_enabled() ? "on" : "off", gcrt::gx::FifoBridge::publish_batch_size(),
+                    static_cast<unsigned long long>(gx.frozenTexCopies), gx.frozenTexBytes / 1048576.0,
+                    static_cast<unsigned long long>(gx.frozenTexReused),
+                    static_cast<unsigned long long>(gx.frozenArrayCopies), gx.frozenArrayBytes / 1048576.0,
+                    static_cast<unsigned long long>(gx.frozenArrayReused), static_cast<unsigned long long>(gx.frozenTluts),
+                    static_cast<unsigned long long>(gx.frozenTexEpochs),
+                    static_cast<unsigned long long>(gx.frozenArrayEpochs), gx.frozenPeakBytes / 1048576.0,
+                    gx.frozenLiveBytes / 1048576.0, static_cast<unsigned long long>(gx.frozenOutdated));
   if (p->audio != nullptr) {
     GcrtAudioStats st{};
     gcrt_audio_get_stats(p->audio, &st);
