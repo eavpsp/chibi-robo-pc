@@ -42,7 +42,8 @@
  *                      minimized: for automated runs
  *   GCRT_NO_FOCUS      1: "no focus" test mode, for launches on a computer someone is using (platform/gcrt_focus.h;
  *                      tools/run.py sets it unless the caller did): the game window is never activated nor raised
- *                      (shown without activation, "normal" counting as "background"; minimized if GCRT_WINDOW=minimized),
+ *                      (shown without activation behind the other windows and not focusable, "normal" counting as
+ *                      "background"; minimized if GCRT_WINDOW=minimized, then behind the others until minimized),
  *                      the menu's fullscreen setting is not applied, a console opened by the console option is created
  *                      minimized without activation, the foreground is never handed to the game window, and Shift
  *                      held at launch no longer shows a skipped setup menu. Default 0
@@ -104,7 +105,17 @@
  *   GCRT_GX_STREAM     diagnostic: fingerprint of the received GX command stream, one line per frame ("frame bytes
  *                      fnv64 draws") in this file; "1" = gx-stream.txt in GCRT_CAPTURE_DIR. GCRT_GX_STREAM_DUMP:
  *                      frames ("12,500") whose full stream is also written (<file>.<frame>.bin)
- *   GCRT_REPORT        period of the intermediate report in seconds (default 5); each report also gives the process
+ *                      With GCRT_GX_STREAM on, two more diagnostics use its frame numbers and the draw index within
+ *                      the frame (0-based, every draw counted, display lists included): GCRT_GX_SKIP_DRAWS
+ *                      ("FRAME:FIRST-LAST[,...]") does not forward those draws to Aurora (find which draw makes a
+ *                      pixel by bisection), GCRT_GX_DRAW_DUMP ("FRAME:DRAW[,...]") writes the state that draw uses
+ *                      to stderr (lines "GXDRAW": BP, CP, XF registers, matrices, array bases, vertex bytes)
+ *   GCRT_GX_TEV_COLOR_TRACE diagnostic: "1" writes one stderr line per GXSetTevColor / GXSetTevKColor call
+ *                      ("TEVCOLOR C|K id RRGGBBAA return-address") (hle/native_gx_tev.c)
+ *   GCRT_HLE_STACK_FILL diagnostic: "BYTE[:SIZE]" (hex byte, SIZE bytes, default 256) writes BYTE into the free guest
+ *                      stack below r1 on entry into every replacement, where the original SDK code had its stack
+ *                      frames: shows whether game code that reads uninitialized locals changes the output (hle/hle.c)
+ *   GCRT_REPORT       period of the intermediate report in seconds (default 5); each report also gives the process
  *                      memory (working set, private bytes, handles)
  *   GCRT_CRASH_DIR, GCRT_CRASH_HANDLER: crash reports (platform/gcrt_crash.h; default folder <user folder>/crashes/,
  *                      or GCRT_CAPTURE_DIR in automated runs); GCRT_CRASH_TEST=<kind>:<frame>: deliberate fault once

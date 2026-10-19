@@ -93,6 +93,7 @@ struct BridgeStats {
   uint64_t frozenArrayBytes = 0;
   uint64_t frozenArrayReused = 0;
   uint64_t frozenTluts = 0;
+  uint64_t zeroTluts = 0;    // CI textures read at a TMEM offset never loaded: palette of zeros (Dolphin)
   uint64_t frozenTexEpochs = 0;
   uint64_t frozenArrayEpochs = 0;
   uint64_t frozenLiveBytes = 0;  // bytes held by frozen copies right now
@@ -217,6 +218,7 @@ private:
   void emit_bp(uint32_t raw);
   void forward_raw(const uint8_t* p, size_t n);
   int tlut_slot_for(uint16_t tmemOffset);
+  int zero_tlut_slot(uint16_t tmemOffset, uint32_t texFmt, uint32_t map); // CI texture without a loaded TLUT
   const uint8_t* host_ptr(uint32_t phys, uint32_t size) const;
 
   // Guest memory
@@ -296,6 +298,13 @@ private:
   uint64_t m_streamBytes = 0;
   uint64_t m_streamDraws = 0;
   uint64_t m_streamFrame = 1;
+  // GCRT_GX_SKIP_DRAWS (diagnostic, needs GCRT_GX_STREAM): {frame, first, last} draw ranges not forwarded to Aurora.
+  std::vector<std::array<uint64_t, 3>> m_skipDraws;
+  bool skip_draw() const;
+  // GCRT_GX_DRAW_DUMP (diagnostic, needs GCRT_GX_STREAM): {frame, draw} whose full state is written to stderr.
+  std::vector<std::array<uint64_t, 2>> m_dumpDraws;
+  uint32_t m_curDisplayList = 0;
+  void dump_draw(const uint8_t* p, uint32_t n, uint32_t vsize);
 };
 
 } // namespace gcrt::gx

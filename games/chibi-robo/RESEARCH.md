@@ -25,6 +25,8 @@ Date: 2026-10-13.
 15. [Sources and credits](#15-sources-and-credits)
 - [Appendix A. SDK functions unnamed in cbr_decomp](#appendix-a-sdk-functions-unnamed-in-cbr_decomp)
 - [Appendix B. Game and HAL library functions](#appendix-b-game-and-hal-library-functions)
+- [Appendix C. GX functions verified on 2026-10-19](#appendix-c-gx-functions-verified-on-2026-10-19)
+- [Appendix D. Audio SDK functions verified on 2026-10-19](#appendix-d-audio-sdk-functions-verified-on-2026-10-19)
 
 ---
 
@@ -570,10 +572,12 @@ What the disc contains `[verified: file]`. For the formats themselves, see `unpl
   - It walks a linked list of TEV constants. For each entry it fills only some channels of one element; in one case it reads back the element's old alpha byte and merges it.
   - At the end it passes elements 0–3 to `GXSetTevKColor` and elements 4–6 to `GXSetTevColor`, for every element the list touched.
   - Channels that no entry wrote, often alpha, keep whatever earlier calls left on the stack. A decompilation or native replacement that changes the stack contents of the preceding calls changes these register values.
+  - Which channels, and whether they matter `[verified: native runs and Dolphin]`. Method: the port's diagnostic `GCRT_HLE_STACK_FILL` writes a fixed byte into the free stack below r1 before every replaced SDK call, and `GCRT_GX_TEV_COLOR_TRACE` logs every `GXSetTevColor` / `GXSetTevKColor` call. On the title boot (US and PAL), runs with the bytes `0x00` and `0xFF` differ only in the alpha of KColor 0 and 1 and TevColor 2, and in the whole of KColor 2 and TevColor 1 on a few calls; every other channel and every call order are identical. In Dolphin, a frame patch that logs the same calls through an HLE-logged stub (no guest stack use) shows other values for those channels than the port, identical over two runs. With fill bytes `0x00`, `0xFF` and no fill, the GX command streams differ in those registers (and in the high bits of the TLUT load address register, BP `0x64`, above the address field; the port ignores them), but every captured frame is identical to the pixel: US `overwrite-save` with 3D scenes (135 frames), US and PAL backyard (100 frames each). So in the scenes checked, these channels are not used by the TEV stages that read the registers.
 - **CARD must never return −1 from a synchronous call**: the game's wrappers would retry forever (section 12).
 - **The frame limiter is a busy-wait** on the retrace counter (section 8). The object-loading waits are `OSYieldThread` loops (section 9).
 - **The audio buffer that reaches the AI is THPSimple's**, not AX's: THPSimple copies AX's output into its own buffer every 5 ms (section 10).
 - **Vertex data reaches the pipe without any function call** (section 11): replacing the GX functions is not enough to capture geometry.
+- **A colour-indexed texture drawn without its palette (PAL only)** `[verified: GX trace + Dolphin frame dump]`. On the first frame of the health-and-safety screen's fade-in, the game draws that screen (a full-screen 608x448 `C8` texture, vertex alpha 10/255, alpha test "greater than 0") while the texture's TLUT register is still 0: TMEM offset 0, format `IA8`, where no TLUT was ever loaded. From the next frame on, the register points to the palette actually loaded (offset `0x200`, `RGB565`) and the fade goes on by 10/255 per frame. Dolphin, whose TMEM reads zeros there, draws nothing on that frame: the dump shows a black frame, then the same first fade step as the native port (luma maximum 20, same mean). The US version never draws a colour-indexed texture without a loaded TLUT in the title-boot sequence.
 
 ---
 
@@ -585,7 +589,7 @@ What the disc contains `[verified: file]`. For the formats themselves, see `unpl
 
   The unlicensed parts were not used as a source.
 - **adierking/unplug** (MIT) — https://github.com/adierking/unplug. The *Chibi-Robo!* modding toolkit, and the reference for the disc, U8, HSD, HPS, SSM, SEM and stage formats.
-- **Dolphin** (GPL-2.0-or-later) — https://github.com/dolphin-emu/dolphin, commit `e6f3ae17`. Behavioural reference, read only: the microcode hash function, the GCI format, the microphone's EXI ID, and the `GameSettings` 60 FPS patch. No code copied.
+- **Dolphin** (GPL-2.0-or-later) — https://github.com/dolphin-emu/dolphin, commit `e6f3ae17`. Behavioural reference, read only: the microcode hash function, the GCI format, the microphone's EXI ID, the `GameSettings` 60 FPS patch, and the meaning of the bits of the GX BP and CP registers (`BPMemory.h`, `CPMemory.h`; used only to read which register field a function writes, nothing copied), and the AX HLE command numbers and parameter-block field names (`AX.h`, `AXStructs.h`; read only for their meaning, nothing copied) and what its AX command handlers do with the AUX buffer addresses (`AX.cpp`; read only to learn which address the DSP writes and which it reads, nothing copied), the memory-card command numbers (`EXI_DeviceMemoryCard.h`; read only for their meaning, nothing copied), and the signature database `Data/Sys/totaldb.dsy` (function names with a size and an opcode checksum; read only to cross-check names whose code we had read, appendices E and F; nothing copied), and the way that database computes its opcode checksum (read in Dolphin's signature-database code only to understand the method, which we then re-implemented in our own words and code; nothing copied), and its frame-patch and HLE debug-print mechanism (`Core/PatchEngine.cpp`, `Core/GeckoCode.cpp`, the general debug print HLE function and the symbol database; read only to understand how a patch can write to the guest memory once per frame and how a fake `OSReport` is intercepted without touching the guest stack, section 14; nothing copied). No code copied.
 - **EverydaySimpleDev/ChibiRobo-GBA-Link** (MIT) — its US hook on the `VIWaitForRetrace` call in `main` (US `0x800156C8`) agrees with our analysis.
 - **Ghidra** (Apache 2.0), with Cuyler36's GameCube loader extension.
 - **ExpansionPak/DolRecomp** (GPL-3.0) — the static recompiler used to run and trace the original code.
@@ -916,6 +920,8 @@ Functions of the Nintendo SDK and the Metrowerks libraries that `cbr_decomp`'s `
 | US | PAL | size | name |
 |---|---|---|---|
 | `0x8017CD74` | `0x8017F5DC` | `0xC` | `AXFXSetHooks` |
+
+The other verified AXFX functions (`__AXFXAllocFunction`, `__AXFXFreeFunction`, `do_src1`, `do_src2` and the two `HandleReverb`) are in appendix F.
 
 ### GX (113)
 
@@ -1281,3 +1287,287 @@ These functions write vertex data to the pipe after a call to `GXBegin` `[verifi
 | `0x801F2E10` | `0x801F5804` | `0xEC` | microphone driver init: 2 channels, 3 alarms, one of them periodic (5 ms) `[verified: Ghidra + trace]` |
 | `0x801F2EFC` | `0x801F58F0` | `0x10C` | microphone probe (section 9) `[verified: Ghidra]` |
 | `0x801F452C` | `0x801F6F20` | `0x120` | microphone periodic alarm handler `[verified: Ghidra + trace]` |
+
+---
+
+## Appendix C. GX functions verified on 2026-10-19
+
+Forty-six GX functions that the step-10c inventory had matched by function order and size, without further proof. They are not in appendix A. Each name is now `[verified: Ghidra]`: we read the PAL disassembly and checked three things against the public SDK API.
+- **What the function writes.** These are the fields of the GX state or of the caller's object. We compared them with the hardware register layouts (BP, CP), as described in Dolphin's `BPMemory.h` and `CPMemory.h` (read only, for the meaning of the bits).
+- **Who reads those fields.** This is a function already verified in appendix A, for example `GXCopyDisp`, `GXLoadTexObjPreLoaded`, `GXLoadTlut`, `__GXSetVCD`, `__GXSetVAT` or `__GXSetDirtyState`.
+- **The callers**, and the arguments they pass.
+
+US addresses: PAL − `0x2868` for the whole library, with the same sizes. Forty-five of the 46 functions have a masked-code signature (section 7) that is unique in both DOLs at these addresses `[verified: signatures]`. `__GXUpdateBPMask` is a lone `blr`: it is anchored on its callers `__GXSetDirtyState` and `GXBegin`, which call it in both versions.
+
+`games/chibi-robo/symbols/supplement.tsv` now lists these 46 names and the 113 GX names of appendix A, each with its evidence. In that file the static function `GXDrawCubeFace@GXDraw` is written `GXDrawCubeFace`.
+
+| US | PAL | size | name |
+|---|---|---|---|
+| `0x801859A8` | `0x80188210` | `0x70` | `GXInitFifoPtrs` |
+| `0x80185A18` | `0x80188280` | `0xC` | `GXInitFifoLimits` |
+| `0x80185F68` | `0x801887D0` | `0x26C` | `GXSetVtxDesc` |
+| `0x801861D4` | `0x80188A3C` | `0x288` | `GXSetVtxDescv` |
+| `0x80186518` | `0x80188D80` | `0x124` | `__GXCalculateVLim` |
+| `0x8018663C` | `0x80188EA4` | `0x1B4` | `GXGetVtxDesc` |
+| `0x801867F0` | `0x80189058` | `0x90` | `GXGetVtxDescv` |
+| `0x80186880` | `0x801890E8` | `0x38` | `GXClearVtxDesc` |
+| `0x801868B8` | `0x80189120` | `0x25C` | `GXSetVtxAttrFmt` |
+| `0x80186B14` | `0x8018937C` | `0x280` | `GXSetVtxAttrFmtv` |
+| `0x80186E1C` | `0x80189684` | `0x280` | `GXGetVtxAttrFmt` |
+| `0x8018709C` | `0x80189904` | `0x74` | `GXGetVtxAttrFmtv` |
+| `0x80187E44` | `0x8018A6AC` | `0x88` | `__GXSendFlushPrim` |
+| `0x80188014` | `0x8018A87C` | `0x144` | `GXAdjustForOverscan` |
+| `0x80188158` | `0x8018A9C0` | `0x7C` | `GXSetDispCopySrc` |
+| `0x801881D4` | `0x8018AA3C` | `0x7C` | `GXSetTexCopySrc` |
+| `0x80188250` | `0x8018AAB8` | `0x34` | `GXSetDispCopyDst` |
+| `0x80188284` | `0x8018AAEC` | `0x130` | `GXSetTexCopyDst` |
+| `0x801883B4` | `0x8018AC1C` | `0x24` | `GXSetDispCopyFrame2Field` |
+| `0x801883D8` | `0x8018AC40` | `0x58` | `GXSetCopyClamp` |
+| `0x80188AD8` | `0x8018B340` | `0x190` | `GXInitLightSpot` |
+| `0x80188C68` | `0x8018B4D0` | `0xD0` | `GXInitLightDistAttn` |
+| `0x801890A8` | `0x8018B910` | `0x15C` | `GXGetTexBufferSize` |
+| `0x80189204` | `0x8018BA6C` | `0xC8` | `__GetImageTileCount` |
+| `0x801892CC` | `0x8018BB34` | `0x24C` | `GXInitTexObj` |
+| `0x80189518` | `0x8018BD80` | `0x48` | `GXInitTexObjCI` |
+| `0x80189560` | `0x8018BDC8` | `0x164` | `GXInitTexObjLOD` |
+| `0x801896C4` | `0x8018BF2C` | `0x10` | `GXGetTexObjWidth` |
+| `0x801896D4` | `0x8018BF3C` | `0x10` | `GXGetTexObjHeight` |
+| `0x801898D4` | `0x8018C13C` | `0x38` | `GXInitTlutObj` |
+| `0x80189B18` | `0x8018C380` | `0x14` | `GXSetTexRegionCallback` |
+| `0x80189B2C` | `0x8018C394` | `0x14` | `GXSetTlutRegionCallback` |
+| `0x8018A260` | `0x8018CAC8` | `0x24` | `GXSetNumIndStages` |
+| `0x8018A284` | `0x8018CAEC` | `0x48` | `GXSetTevDirect` |
+| `0x8018A2CC` | `0x8018CB34` | `0x4` | `__GXUpdateBPMask` |
+| `0x8018A568` | `0x8018CDD0` | `0x64` | `GXSetTevColorS10` |
+| `0x8018AA1C` | `0x8018D284` | `0x28` | `GXSetNumTevStages` |
+| `0x8018AC58` | `0x8018D4C0` | `0x1B0` | `GXInitFogAdjTable` |
+| `0x8018B22C` | `0x8018DA94` | `0x6CC` | `GXDrawCylinder` |
+| `0x8018B8F8` | `0x8018E160` | `0x37C` | `GXDrawSphere` |
+| `0x8018BC74` | `0x8018E4DC` | `0x218` | `GXDrawCubeFace@GXDraw` |
+| `0x8018BE8C` | `0x8018E6F4` | `0x250` | `GXDrawCube` |
+| `0x8018C14C` | `0x8018E9B4` | `0x174` | `GXProject` |
+| `0x8018C3F0` | `0x8018EC58` | `0x48` | `GXGetProjectionv` |
+| `0x8018C650` | `0x8018EEB8` | `0x58` | `GXSetViewportJitter` |
+| `0x8018C6F0` | `0x8018EF58` | `0x24` | `GXGetViewportv` |
+
+How each family was checked:
+- **FIFO objects**:
+  - `GXInitFifoPtrs` sets the read pointer, the write pointer and the distance between them, with interrupts disabled;
+  - `GXInitFifoLimits` sets the two watermarks;
+  - both are called only by `GXInitFifoBase`, with (base, base) and (size − `0x4000`, half the size).
+- **Vertex descriptors and formats**:
+  - `GXSetVtxDesc` and `GXSetVtxDescv` write the CP VCD_LO and VCD_HI fields: 1-bit matrix indices, 2-bit position, normal, colour and texture-coordinate types. `GXSetVtxAttrFmt` and `GXSetVtxAttrFmtv` write the VAT A, B and C fields of one vertex format (count, type, fraction).
+  - Both setters only mark the state dirty. `__GXSetVCD` and `__GXSetVAT` write the registers later.
+  - The getters read the same fields back. `GXGetVtxDescv` and `GXGetVtxAttrFmtv` loop over them and end the list with attribute `0xFF`.
+  - `GXClearVtxDesc` leaves only the direct position.
+  - `__GXCalculateVLim` computes the vertex size from these fields. `__GXSetDirtyState` calls it when the descriptor or the format is dirty.
+  - `__GXSendFlushPrim` writes a triangle-strip header followed by zero bytes. It is called by `GXBegin` and `GXCallDisplayList`.
+- **Copies**:
+  - `GXSetDispCopySrc` and `GXSetTexCopySrc` build the BP `0x49`/`0x4A` words (source corner and size). `GXSetDispCopyDst` and `GXSetTexCopyDst` build BP `0x4D` (destination stride).
+  - The display-copy words are the ones `GXCopyDisp` sends, and the texture-copy words the ones `GXCopyTex` sends.
+  - `GXSetDispCopyFrame2Field` sets bits 12-13 of the BP `0x52` copy control.
+  - `GXSetCopyClamp` sets bits 0-1 (clamp top and bottom) of both copy controls. Step 10c had guessed `__GXGetNumXfbLines` for it, from order and size alone. `__GXInitGX` calls it with 3, both edges.
+  - `GXSetTexCopyDst` calls `__GetImageTileCount`, which returns the tile counts of a texture format.
+  - `GXAdjustForOverscan` copies a `GXRenderModeObj` and shrinks its sizes by the margins.
+- **Textures**:
+  - `GXInitTexObj` builds the TX_SETMODE0, TX_SETIMAGE0 and TX_SETIMAGE3 words that `GXLoadTexObjPreLoaded` sends: wrap, filters, width − 1, height − 1, format, address >> 5. `GXInitTexObjLOD` adds the LOD fields of TX_SETMODE0 and TX_SETMODE1.
+  - `GXInitTexObjCI` calls `GXInitTexObj`, then stores the TLUT name.
+  - `GXGetTexObjWidth` and `GXGetTexObjHeight` return TX_SETIMAGE0 bits 0-9 and 10-19, plus one.
+  - `GXGetTexBufferSize` uses the same tile sizes per format, summed over the mipmap levels.
+  - `GXInitTlutObj` builds the BP `0x64` word that `GXLoadTlut` sends.
+  - `GXSetTexRegionCallback` and `GXSetTlutRegionCallback` swap the callback pointers that `GXLoadTexObj` and `GXLoadTlut` call. `__GXInitGX` passes `__GXDefaultTexRegionCallback` and `__GXDefaultTlutRegionCallback`.
+- **TEV and general mode**:
+  - `GXSetNumTevStages` writes BP `0x00` bits 10-13 (count − 1), and `GXSetNumIndStages` bits 16-18.
+  - `GXSetTevDirect` is a tail call of `GXSetTevIndirect` with all-zero arguments.
+  - `GXSetTevColorS10` uses the same BP `0xE0`+2n and `0xE1`+2n write pattern as `GXSetTevColor`, with 11-bit components.
+  - `__GXUpdateBPMask` is empty; `__GXSetDirtyState` calls it for dirty bit `0x2`.
+- **Lights and fog**:
+  - `GXInitLightSpot` stores the angle attenuation (a0-a2) and `GXInitLightDistAttn` the distance attenuation (k0-k2): the same fields as `GXInitLightAttn`.
+  - `GXInitFogAdjTable` fills the 10 entries of 12 bits that `GXSetFogRangeAdj` sends.
+- **Transform**:
+  - `GXGetProjectionv` and `GXGetViewportv` read back what `GXSetProjection` and `GXSetViewport` store.
+  - `GXSetViewportJitter` is `GXSetViewport` plus an offset of the top edge when its field argument is 0.
+  - `GXProject` transforms a point by a view matrix, a projection array in the `GXGetProjectionv` layout and a viewport.
+- **GXDraw**:
+  - `GXDrawCylinder`, `GXDrawSphere` and `GXDrawCube` save the vertex state with the getters above, set direct `f32` positions and normals on vertex format 3, write their vertices inline after `GXBegin`, then restore the state. These are the three "helper functions" of section 11.
+  - `GXDrawCylinder` makes one triangle strip and two fans, `GXDrawSphere` one strip per band.
+  - `GXDrawCube` makes one quad list of 24 vertices, built by six calls of the static `GXDrawCubeFace`.
+
+**Object layouts used by this SDK revision** `[verified: Ghidra]`, for native code that reads the game's own objects:
+
+| object | layout |
+|---|---|
+| `GXFifoObj` | `+0x00` base, `+0x04` top (last word), `+0x08` size, `+0x0C` high watermark, `+0x10` low watermark, `+0x14` read pointer, `+0x18` write pointer, `+0x1C` distance |
+| `GXTexObj` (`0x20` bytes) | `+0x00` TX_SETMODE0 word, `+0x04` TX_SETMODE1 word, `+0x08` TX_SETIMAGE0 word, `+0x0C` image address >> 5, `+0x14` format, `+0x18` TLUT name (CI formats), `+0x1C` load tile count (u16), `+0x1E` load format (u8), `+0x1F` flags (bit 0 = mipmap, bit 1 = not colour-indexed) |
+| `GXTlutObj` | `+0x00` TLUT format (bits 10-11), `+0x04` BP `0x64` word (table address >> 5), `+0x08` entry count (u16) |
+| `GXLightObj` | `+0x0C` colour, `+0x10` a0-a2, `+0x1C` k0-k2, `+0x28` position, `+0x34` direction (negated) |
+
+## Appendix D. Audio SDK functions verified on 2026-10-19
+
+Fifty-one functions of the AI, DSP and AX libraries that the step-10d inventory had matched by function order, size and call graph, without further proof. They are not in appendix A. Each name is now `[verified: Ghidra]`: we read the PAL disassembly and checked what the function reads and writes, and who calls it.
+- **AI and DSP**: the code was compared with the CC0 reference sources `ai.c`, `dsp.c`, `dsp_task.c` and `dsp_debug.c` in `cbr_decomp/decomp_dtk_main` (hardware registers `0xCC006C00`-`0xCC006C08` and `0xCC005000`-`0xCC005036`, task-list links, call order).
+- **AX** has no reference source (section 7). Each name was checked against the state it shares with functions already verified in appendix A, and against its place in the init and quit sequences. Dolphin's AX HLE (`AX.h` command numbers, `AXStructs.h` parameter-block layout) was read for the meaning of the command list and of the PB fields only.
+
+US addresses: PAL − `0x2874` up to `AIInit`, then PAL − `0x2868` from `__AISHandler` to the end of the DSP library (the US DOL has the extra 12-byte `AIReset` after `AIInit`). Sizes are equal in both versions. For 36 of the 51 functions the masked-code signature (section 7) is unique in both DOLs at these addresses `[verified: signatures]`. Fourteen others have masked code that also occurs elsewhere, and `__AXGetCurrentProfile` had no signature computed. Each of these fifteen lies between two functions with unique signatures, and every function in between has the same size at the same offset in both DOLs.
+
+`games/chibi-robo/symbols/supplement.tsv` now lists these 51 names, plus the 44 audio names of appendix A that it lacked, each with its evidence.
+
+**Correction.** PAL `0x8017725C` / US `0x801749E8` is the `static` function `__AI_set_stream_sample_rate` of `ai.c`, not `AISetStreamSampleRate`. Its body is the reference body of `__AI_set_stream_sample_rate`, with no `rate == 1` test. Its only caller is `AIInit`, with argument 1, and the reference `AIInit` makes exactly that call. The reference's public `AISetStreamSampleRate` is a separate 16-byte function, which this DOL does not contain.
+
+| US | PAL | size | name |
+|---|---|---|---|
+| `0x8017480C` | `0x80177080` | `0xD8` | `AISetStreamPlayState` |
+| `0x801748E4` | `0x80177158` | `0x10` | `AIGetStreamPlayState` |
+| `0x801749D4` | `0x80177248` | `0x14` | `AIGetDSPSampleRate` |
+| `0x801749E8` | `0x8017725C` | `0xD4` | `__AI_set_stream_sample_rate` |
+| `0x80174ABC` | `0x80177330` | `0x10` | `AIGetStreamSampleRate` |
+| `0x80174AE8` | `0x8017735C` | `0x10` | `AIGetStreamVolLeft` |
+| `0x80174B14` | `0x80177388` | `0x10` | `AIGetStreamVolRight` |
+| `0x80174C9C` | `0x80177504` | `0x7C` | `__AISHandler` |
+| `0x80174DC4` | `0x8017762C` | `0x58` | `__AICallbackStackSwitch` |
+| `0x80174E1C` | `0x80177684` | `0x1E4` | `__AI_SRC_INIT` |
+| `0x8017CE90` | `0x8017F6F8` | `0x8` | `DSPCheckInit` |
+| `0x8017CF08` | `0x8017F770` | `0x40` | `DSPCancelTask` |
+| `0x8017D010` | `0x8017F878` | `0x50` | `__DSP_debug_printf` |
+| `0x8017D7B0` | `0x80180018` | `0xA0` | `__DSP_insert_task` |
+| `0x8017D850` | `0x801800B8` | `0x94` | `__DSP_remove_task` |
+| `0x80176FC0` | `0x80179828` | `0x34` | `AXQuit` |
+| `0x80176FF4` | `0x8017985C` | `0x18` | `__AXGetStackHead` |
+| `0x8017700C` | `0x80179874` | `0x74` | `__AXServiceCallbackStack` |
+| `0x80177080` | `0x801798E8` | `0xB4` | `__AXAllocInit` |
+| `0x80177134` | `0x8017999C` | `0xB4` | `__AXAllocQuit` |
+| `0x801771E8` | `0x80179A50` | `0x20` | `__AXPushFreeStack` |
+| `0x80177208` | `0x80179A70` | `0x10` | `__AXPushCallbackStack` |
+| `0x80177218` | `0x80179A80` | `0x1C` | `__AXPopCallbackStack` |
+| `0x80177234` | `0x80179A9C` | `0x94` | `__AXRemoveFromStack` |
+| `0x801772C8` | `0x80179B30` | `0x80` | `AXFreeVoice` |
+| `0x80177348` | `0x80179BB0` | `0x174` | `AXAcquireVoice` |
+| `0x801774BC` | `0x80179D24` | `0xA8` | `AXSetVoicePriority` |
+| `0x80177564` | `0x80179DCC` | `0xE4` | `__AXAuxInit` |
+| `0x80177648` | `0x80179EB0` | `0x10` | `__AXAuxQuit` |
+| `0x801777B0` | `0x8017A018` | `0x23C` | `__AXProcessAux` |
+| `0x801779EC` | `0x8017A254` | `0xC` | `AXRegisterAuxACallback` |
+| `0x801779F8` | `0x8017A260` | `0xC` | `AXRegisterAuxBCallback` |
+| `0x80177A04` | `0x8017A26C` | `0x8` | `__AXGetCommandListCycles` |
+| `0x80177A0C` | `0x8017A274` | `0x3C` | `__AXGetCommandListAddress` |
+| `0x80177A48` | `0x8017A2B0` | `0x6B0` | `__AXNextFrame` |
+| `0x801780F8` | `0x8017A960` | `0x24` | `__AXClInit` |
+| `0x8017811C` | `0x8017A984` | `0x4` | `__AXClQuit` |
+| `0x80178120` | `0x8017A988` | `0x14` | `AXSetMode` |
+| `0x801788A4` | `0x8017B10C` | `0x58` | `__AXOutQuit` |
+| `0x80178940` | `0x8017B1A8` | `0xC` | `__AXGetStudio` |
+| `0x80178D44` | `0x8017B5AC` | `0x2C` | `__AXSPBInit` |
+| `0x80178D70` | `0x8017B5D8` | `0x4` | `__AXSPBQuit` |
+| `0x80178D74` | `0x8017B5DC` | `0x94` | `__AXDepopVoice` |
+| `0x80178E08` | `0x8017B670` | `0x8` | `__AXGetNumVoices` |
+| `0x80178E10` | `0x8017B678` | `0x74C` | `__AXServiceVPB` |
+| `0x8017955C` | `0x8017BDC4` | `0x278` | `__AXSyncPBs` |
+| `0x801797D4` | `0x8017C03C` | `0xC` | `__AXGetPBs` |
+| `0x801797E0` | `0x8017C048` | `0x44` | `__AXSetPBDefault` |
+| `0x80179824` | `0x8017C08C` | `0x204` | `__AXVPBInit` |
+| `0x80179A28` | `0x8017C290` | `0x4` | `__AXVPBQuit` |
+| `0x8017A39C` | `0x8017CC04` | `0x48` | `__AXGetCurrentProfile` |
+
+How each family was checked:
+- **AI** (10):
+  - `AISetStreamPlayState` follows the reference line for line. It returns early if the state does not change. When the stream rate is 32 kHz and play is requested, it mutes both stream volumes, runs `__AI_SRC_INIT` with interrupts disabled, sets AICR bits 5 and 0, then restores the volumes.
+  - The getters read AICR bit 0 (play state), bit 1 (stream rate) and inverted bit 6 (DSP rate), and the two bytes of AIVR (stream volumes).
+  - `AIInit` installs `__AISHandler` for interrupt 8 (AI). This handler acknowledges AICR bit 3 and calls the stream callback with the sample counter `0xCC006C08`.
+  - `__AICallbackStackSwitch` runs the DMA callback on the stack given to `AIInit`. Only `__AIDHandler` calls it.
+  - `__AI_SRC_INIT` busy-waits on sample-counter changes and times them with `OSGetTime`.
+- **DSP** (5):
+  - `DSPCheckInit` returns the flag that `DSPInit` tests and sets.
+  - `DSPCancelTask` sets the cancel flag (`0x2`) of a task with interrupts disabled. `__AXOutQuit` calls it.
+  - `__DSP_debug_printf` is an empty variadic function. `DSPInit` and `__DSP_boot_task` call it.
+  - `__DSP_insert_task` (priority-ordered insertion) and `__DSP_remove_task` (flags 0, state done, unlink) match the reference.
+- **AX voice allocation** (11):
+  - Voices sit on 32 doubly linked stacks, one per priority, plus a singly linked callback stack. Stack 0 is the free list.
+  - `AXAcquireVoice(priority, callback, context)` takes a free voice, or steals one from a lower priority after calling its callback.
+  - `AXFreeVoice` and `AXSetVoicePriority` unlink the voice with `__AXRemoveFromStack` and relink it.
+  - `__AXPushFreeStack`, `__AXPushCallbackStack`, `__AXPopCallbackStack` and `__AXGetStackHead` are the stack primitives.
+  - `__AXServiceCallbackStack` calls the callback of each voice the DSP dropped, then frees it.
+  - `__AXAllocInit` and `__AXAllocQuit` have identical code; their callers tell them apart.
+- **AX init and quit**:
+  - `AXQuit` calls `__AXAllocQuit`, `__AXVPBQuit`, `__AXSPBQuit`, `__AXAuxQuit`, `__AXClQuit` and `__AXOutQuit`. This is the order of the six init calls of `AXInitEx`.
+  - The three empty quit functions each directly follow the init function of the same module.
+  - `__AXOutQuit` cancels the AX DSP task, sleeps until the done callback wakes it, and stops AI DMA.
+- **AUX buses**:
+  - `AXRegisterAuxACallback` and `AXRegisterAuxBCallback` store a callback and a context. The HAL effect setup calls the first for channel 0 and the second for channel 1.
+  - `__AXAuxInit` and `__AXAuxQuit` clear these callbacks.
+  - `__AXProcessAux` invalidates the bus buffer, calls the callback with it, flushes it and advances the buffer index.
+- **Command list**:
+  - `__AXNextFrame` writes the next command list. It starts with command 0 and the address returned by `__AXGetStudio`, followed by the PB and AUX buffer addresses. After each command it adds to a DSP-cycle counter, which `__AXGetCommandListCycles` returns to `__AXSyncPBs`.
+  - `__AXGetCommandListAddress` swaps between two lists of `0x300` bytes. `__AXClInit` resets that state and the mode that `AXSetMode` stores. The only caller of `AXSetMode` is the HAL sound-mode function, which also calls `OSSetSoundMode`.
+- **Voice parameter blocks**:
+  - `__AXSyncPBs` walks the voices from priority 31 down within the cycle budget. For each voice it calls `__AXServiceVPB`, which copies the fields whose sync bits are set, or `__AXDepopVoice`, or it moves the voice to the callback stack.
+  - `__AXDepopVoice` adds the nine depop values of a PB (`+0x52`) to nine accumulators. `__AXSPBInit` clears those accumulators.
+  - `__AXGetNumVoices` returns the count kept by `__AXServiceVPB`.
+  - `__AXVPBInit` builds the PB array that `__AXGetPBs` returns.
+  - `__AXSetPBDefault` stops the PB and marks it for a full rewrite.
+  - `__AXGetCurrentProfile` returns the next entry of an optional profiling ring. Its caller is `__AXOutNewFrame`.
+
+**AX voice layout used by this SDK revision** `[verified: Ghidra]`, for native code that reads the game's voices (`AXVPB`). The offsets and sizes are read from the disassembly; the field names (for example `running`, `ITD`) are taken from Dolphin's `AXStructs.h`, read only for their meaning:
+
+| offset | field |
+|---|---|
+| `+0x00`, `+0x04` | next and previous voice in its priority stack |
+| `+0x08` | next voice in the callback stack |
+| `+0x0C` | priority (0 = free) |
+| `+0x10`, `+0x14` | callback and its context (from `AXAcquireVoice`) |
+| `+0x1C` | sync bits (fields to copy to the DSP PB) |
+| `+0x138` | the voice's copy of the PB: `running` at `+0x146` (PB `+0x0E`), ITD at `+0x16E` (PB `+0x36`) |
+
+Still unverified, kept out of this appendix: `__AXGetAuxAInput` (PAL `0x80179EC0`). Its code is known, but we have no source that fixes which of the two AUX buffer roles the SDK calls "input". The same holds for the nine AUX buffer getters that follow it, the studio depop function at PAL `0x8017B1B4`, and the AXFX effect functions except `AXFXSetHooks` and those verified in appendix F.
+
+## Appendix E. OS, VI and CARD functions verified on 2026-10-19
+
+Eleven functions of the OS, VI and CARD libraries that the step-10a, step-10b and milestone-7 inventories had named from their position, size and calls only. They are not in appendix A. Each name is now `[verified: Ghidra + ref]`: we read the PAL disassembly and compared it with the CC0 reference sources and headers of `cbr_decomp/decomp_dtk_main` (`vi.c`, `CARDBios.c`, `CARDRdwr.c`, `CARDMount.c`, `OSRtc.c`, `os.h`).
+- **Same body as the reference, newer SDK revision.** `__CARDStart`, `__CARDWritePage`, `__CARDEraseSector`, `__CARDWrite`, `Retry@CARDBios`, `BlockWriteCallback@CARDRdwr` and `DoMount@CARDMount` keep the reference's calls, commands and control flow. Their sizes differ because the card page size is read from the control block (`+0x0A`) instead of the constant 128. `__CARDEraseSector` returns at once for pages larger than `0x80`. `DoMount` makes two extra calls after `IsCard`: it reads the card's ID into control block `+0x12`, then queries a fast-mode flag. It picks `0x200`-byte pages when that flag is set and the ID's high byte is `0xEC`, and `0x80`-byte pages otherwise. The memory-card command numbers `0xF1` (sector erase) and `0xF2` (page program) agree with Dolphin's memory-card emulation (`EXI_DeviceMemoryCard.h`, read only).
+- **`VIGetNextField`** has the reference body of `vi.c` line for line: the field from the current half line, xored with bit 0 of `HorVer.adjDispPosY`.
+- **`OSGetLanguage`** returns byte `+0x12` (`language`) of the SRAM block under the SRAM lock. **`OSGetEuRgb60Mode`** (PAL only) returns bit 6 of byte `+0x11` (`ntd`), the bit that the reference `OSSetEuRgb60Mode` writes. Both prototypes are in `os.h`.
+- **`__CARDFreeBlock`** walks a FAT chain up to `0xFFFF`, frees each block, returns `-6` (broken) for a block outside `5`..block count, then calls `__CARDUpdateFatBlock`. Its only caller is `DeleteCallback@CARDDelete`.
+- **Cross-check with Dolphin's signature database.** `Data/Sys/totaldb.dsy` holds a name, a size and a 32-bit checksum for each function. For the checksum, each instruction contributes its primary opcode, plus its extended-opcode bits for some opcodes or its two register fields for loads, stores and immediate arithmetic, rotated into an accumulator; immediates and branch offsets are left out. We recomputed it over our functions. It gives the database checksum for 256 of the 279 symbol-map functions that the database lists under the same name and size; most of the 23 others are hand-written assembly. `OSGetLanguage`, `__CARDFreeBlock` and `DeleteCallback@CARDDelete` have the same checksum, size and name in PAL and US. This was used only to confirm names whose code we had read. Tiny functions of the same shape collide in the database, so a match alone proves nothing.
+
+The five `OSStopwatch` functions of appendix A had a stale "hypothesis" status in `supplement.tsv`. They are now `verified` there: the header `OSStopwatch.h` gives their prototypes, and each body matches its prototype (`OSInitStopwatch` stores the name and clears the counters, `OSStartStopwatch` stores the start time, `OSStopStopwatch` adds the interval and updates the minimum and maximum, `OSCheckStopwatch` returns the 64-bit total, `OSResetStopwatch` clears without the name).
+
+US addresses: PAL − `0x28B0` for the EXI, SI, OS, DVD and VI functions of `supplement.tsv`, up to `VIGetTvFormat`. Inside `OSRtc.c` the US DOL has `OSGetProgressiveMode` and `OSSetProgressiveMode` (`0x114` bytes) before `OSGetLanguage`, so `OSGetLanguage` is at PAL − `0x279C`. In the same place, PAL has `OSGetEuRgb60Mode` and `OSSetEuRgb60Mode`. From `__VIDisplayPositionToXY` the offset is PAL − `0x2874`, and it is PAL − `0x2868` from `__AISHandler` through the CARD library. Every address in this appendix has a masked-code signature (section 7) that is unique in both DOLs at these addresses, with equal sizes `[verified: signatures]`.
+
+`games/chibi-robo/symbols/supplement.tsv` now lists these names, plus 113 OS, EXI, SI, PAD, DVD, VI and CARD names of appendix A that it lacked, each with its evidence. Static functions are written without `@file`. The static names `OnReset`, `WriteCallback` and `EraseCallback` are left out of that file because several SDK files define them, so they would not be unique in a symbol map.
+
+| US | PAL | size | name |
+|---|---|---|---|
+| `0x8016991C` | `0x8016C0B8` | `0x6C` | `OSGetLanguage` |
+| — | `0x8016C124` | `0x70` | `OSGetEuRgb60Mode` |
+| `0x80172958` | `0x80175208` | `0x9C` | `VIGetNextField` |
+| `0x8017E028` | `0x80180890` | `0x2A0` | `Retry@CARDBios` |
+| `0x8017E3D8` | `0x80180C40` | `0x224` | `__CARDStart` |
+| `0x8017E730` | `0x80180F98` | `0x13C` | `__CARDWritePage` |
+| `0x8017E86C` | `0x801810D4` | `0x110` | `__CARDEraseSector` |
+| `0x80180230` | `0x80182A98` | `0xE8` | `BlockWriteCallback@CARDRdwr` |
+| `0x80180318` | `0x80182B80` | `0x68` | `__CARDWrite` |
+| `0x8018063C` | `0x80182EA4` | `0x9C` | `__CARDFreeBlock` |
+| `0x80181B98` | `0x80184400` | `0x454` | `DoMount@CARDMount` |
+
+Still unverified, kept out of this appendix: the `static` functions of `OSLink.c` and two empty functions next to them, as well as the card-ID reader and the fast-mode setter and getter that `DoMount` uses. Their code and roles are known, but no licensed source names them for this code.
+
+## Appendix F. AXFX functions verified on 2026-10-19
+
+The AXFX library (the four AUX effects of the SDK) sits between the AX library and `DSPInit`. The step-10d inventory named its 24 functions from their order and from the sound library's effect selector (HAL, PAL `0x801EB778` / US `0x801E8D84`). We read the PAL disassembly of all of them. Six names are now verified, each by its own evidence:
+- **`__AXFXAllocFunction` and `__AXFXFreeFunction`**: the first calls `OSAllocFromHeap(__OSCurrHeap, size)`, the second `OSFreeToHeap(__OSCurrHeap, ptr)`. The DOL initialises the two hook variables that `AXFXSetHooks` writes (first argument, then second) to these two addresses. Every AXFX function that creates an effect allocates through the first hook, and every function that frees one goes through the second. Dolphin's signature database lists exactly these two names, with `AXFXSetHooks` and `AXFXGetHooks`, in `axfx.a AXFXHooks.o`. Its entries for them have another size (another SDK revision), so they were used only for the names. Our `AXFXSetHooks` has the database's size and checksum in both versions, and no `AXFXGetHooks` follows it in this DOL (the next function is `DSPCheckMailToDSP`).
+- **`do_src1` and `do_src2`** (`static`): the two functions that only the chorus effect's AUX callback calls. Each converts one 160-sample frame from a ring buffer, with a fractional read position and 4-tap interpolation (a sample-rate converter).
+- **`HandleReverb`** (`static`, defined twice): the per-channel processing of the two reverb effects. One callback calls the first for the left, right and surround buffers. The other callback calls the second once.
+
+For `do_src1`, `do_src2` and both `HandleReverb`, Dolphin's signature database gives the name with the same size and the same opcode checksum (method: appendix E), at the PAL and the US address. This was used only for names whose code we had read. `OSAllocFromHeap` and `OSFreeToHeap` also have the database's checksum, size and name in both versions. The `static` name `HandleReverb` is not added to `supplement.tsv`, because it would not be unique in a symbol map (same rule as `OnReset` in appendix E).
+
+US addresses: PAL − `0x2868`, the same delta as the rest of the AX library. Every function has the same size at that delta in both DOLs, between functions whose masked-code signatures are unique.
+
+| US | PAL | size | name |
+|---|---|---|---|
+| `0x8017AAFC` | `0x8017D364` | `0x50C` | `HandleReverb` (first reverb) |
+| `0x8017B768` | `0x8017DFD0` | `0x3B4` | `HandleReverb` (second reverb) |
+| `0x8017BD28` | `0x8017E590` | `0x198` | `do_src1` |
+| `0x8017BEC0` | `0x8017E728` | `0x1EC` | `do_src2` |
+| `0x8017CD24` | `0x8017F58C` | `0x28` | `__AXFXAllocFunction` |
+| `0x8017CD4C` | `0x8017F5B4` | `0x28` | `__AXFXFreeFunction` |
+
+Still unverified, kept out of this appendix: the public `Init`, `Shutdown`, `Callback` and `Settings` functions of the four effects, and their internal create and free functions. Their roles are known from the code: the effect selector's four parameter blocks, the delay lines each effect allocates, and the callbacks it registers with `AXRegisterAuxACallback` and `AXRegisterAuxBCallback`. But no licensed source or database entry spells their names for this code. The same holds for the AUX buffer getters of the AX library and for the studio frame function called by `__AXOutNewFrame`.

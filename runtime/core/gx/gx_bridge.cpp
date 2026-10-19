@@ -617,6 +617,57 @@ bool FifoBridge::open_stream_log(const char* path, const char* dumpFrames) {
       s = end;
     }
   }
+  // GCRT_GX_SKIP_DRAWS="FRAME:FIRST-LAST[,...]" (diagnostic): the draws FIRST to LAST (0-based index within the frame, as
+  // counted in the "draws" column of the stream log) of frame FRAME are not forwarded to Aurora.
+  m_skipDraws.clear();
+  if (const char* skip = std::getenv("GCRT_GX_SKIP_DRAWS"); skip != nullptr) {
+    const char* s = skip;
+    while (*s != '\0') {
+      char* end = nullptr;
+      const unsigned long long frame = std::strtoull(s, &end, 10);
+      if (end == s || *end != ':') {
+        break;
+      }
+      s = end + 1;
+      const unsigned long long first = std::strtoull(s, &end, 10);
+      if (end == s) {
+        break;
+      }
+      unsigned long long last = first;
+      s = end;
+      if (*s == '-') {
+        last = std::strtoull(s + 1, &end, 10);
+        s = end;
+      }
+      m_skipDraws.push_back({frame, first, last});
+      std::fprintf(stderr, "gcrt gx: GCRT_GX_SKIP_DRAWS: frame %llu, draws %llu to %llu not drawn\n", frame, first, last);
+      while (*s == ',' || *s == ' ') {
+        ++s;
+      }
+    }
+  }
+  // GCRT_GX_DRAW_DUMP="FRAME:DRAW[,...]" (diagnostic): the state used by that draw is written to stderr.
+  m_dumpDraws.clear();
+  if (const char* dump = std::getenv("GCRT_GX_DRAW_DUMP"); dump != nullptr) {
+    const char* s = dump;
+    while (*s != '\0') {
+      char* end = nullptr;
+      const unsigned long long frame = std::strtoull(s, &end, 10);
+      if (end == s || *end != ':') {
+        break;
+      }
+      s = end + 1;
+      const unsigned long long draw = std::strtoull(s, &end, 10);
+      if (end == s) {
+        break;
+      }
+      s = end;
+      m_dumpDraws.push_back({frame, draw});
+      while (*s == ',' || *s == ' ') {
+        ++s;
+      }
+    }
+  }
   m_streamHash = 0xCBF29CE484222325ull;
   m_streamBytes = 0;
   m_streamDraws = 0;
@@ -639,6 +690,60 @@ void FifoBridge::close_stream_log() {
     std::fclose(m_streamDump);
     m_streamDump = nullptr;
   }
+}
+
+void FifoBridge::dump_draw(const uint8_t* p, uint32_t n, uint32_t vsize) {
+  std::fprintf(stderr, "GXDRAW frame %llu draw %llu op %02X n %u vsize %u dl %08X\n",
+               static_cast<unsigned long long>(m_streamFrame), static_cast<unsigned long long>(m_streamDraws), p[0], n,
+               vsize, m_inDisplayList ? m_curDisplayList : 0u);
+  for (uint32_t r = 0; r < 256; ++r) {
+    if (m_bpValid[r]) {
+      std::fprintf(stderr, "GXDRAW BP %02X %06X\n", r, m_bp[r] & 0xFFFFFFu);
+    }
+  }
+  for (uint32_t r = 0; r < 256; ++r) {
+    if (m_cpValid[r]) {
+      std::fprintf(stderr, "GXDRAW CP %02X %08X\n", r, m_cpRegs[r]);
+    }
+  }
+  std::fprintf(stderr, "GXDRAW VCD %08X %08X\n", m_vcdLo, m_vcdHi);
+  for (uint32_t r = 0; r < 0x58; ++r) {
+    if (m_xfRegValid[r]) {
+      std::fprintf(stderr, "GXDRAW XF %04X %08X\n", 0x1000 + r, m_xfRegs[r]);
+    }
+  }
+  for (uint32_t i = 0; i < 6; ++i) {
+    std::fprintf(stderr, "GXDRAW VP %u %08X\n", i, m_viewport[i]);
+  }
+  for (uint32_t i = 0; i < 7; ++i) {
+    std::fprintf(stderr, "GXDRAW PROJ %u %08X\n", i, m_projection[i]);
+  }
+  for (uint32_t a = 0; a < 0x680; a += 4) {
+    if (m_xfMem[a] | m_xfMem[a + 1] | m_xfMem[a + 2] | m_xfMem[a + 3]) {
+      std::fprintf(stderr, "GXDRAW XFMEM %04X %08X %08X %08X %08X\n", a, m_xfMem[a], m_xfMem[a + 1], m_xfMem[a + 2],
+                   m_xfMem[a + 3]);
+    }
+  }
+  for (uint32_t i = 0; i < 16; ++i) {
+    std::fprintf(stderr, "GXDRAW ARRAY %u base %08X stride %u\n", i, m_arrays[i].base, m_arrays[i].stride);
+  }
+  const size_t bytes = static_cast<size_t>(n) * vsize;
+  for (size_t off = 0; off < bytes; off += 32) {
+    std::fprintf(stderr, "GXDRAW VTX %04zX", off);
+    for (size_t k = off; k < bytes && k < off + 32; ++k) {
+      std::fprintf(stderr, " %02X", p[3 + k]);
+    }
+    std::fprintf(stderr, "\n");
+  }
+}
+
+bool FifoBridge::skip_draw() const {
+  for (const auto& r : m_skipDraws) {
+    if (r[0] == m_streamFrame && m_streamDraws >= r[1] && m_streamDraws <= r[2]) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void FifoBridge::stream_hash(const uint8_t* p, size_t n) {
@@ -825,6 +930,7 @@ void FifoBridge::run_display_list(uint32_t phys, uint32_t size) {
   ++m_stats.displayLists;
   GCRT_TRACE(GCRT_TRACE_GX, "CALL_DL 0x%08X (%u bytes)", phys, size);
   m_inDisplayList = true;
+  m_curDisplayList = phys;
   size_t off = 0;
   while (off < size) {
     const size_t n = run_command(dl + off, size - off, true);
@@ -1240,6 +1346,35 @@ int FifoBridge::tlut_slot_for(uint16_t tmemOffset) {
   return freeSlot >= 0 ? freeSlot : oldest;
 }
 
+// A color-indexed texture reads its palette at a TMEM offset where no TLUT was ever loaded. The texture unit still
+// reads TMEM there: the SDK writes the TLUT register from the region's TLUT object, which stays 0 (offset 0, IA8) until
+// GXLoadTlut is called for that name (GXTexture.c: GXInitTlutRegion only sets the load register). Dolphin reads its
+// TMEM array there, zeros until a TLUT load or a preload writes it (VideoCommon TextureInfo.cpp, tmem_offset << 9;
+// TextureDecoder_Common.cpp, s_tex_mem). Same here: a palette of zeros (transparent black in IA8 and RGB5A3, black in
+// RGB565), replaced by the next real load at that offset. Without it, Aurora would read whatever TLUT slot 0 last
+// held (possibly a copy already freed). Not modelled: a load at another offset whose range covers this one.
+// [hypothesis] on the console, that TMEM holds what the texture cache left there.
+int FifoBridge::zero_tlut_slot(uint16_t tmemOffset, uint32_t texFmt, uint32_t map) {
+  const uint32_t entries = texFmt == 0x8 ? 16u : texFmt == 0x9 ? 256u : 16384u; // C4, C8, C14X2
+  const int slot = tlut_slot_for(tmemOffset);
+  auto& t = m_tluts[static_cast<size_t>(slot)];
+  t.valid = true;
+  t.tmemOffset = tmemOffset;
+  t.entries = static_cast<uint16_t>(entries);
+  FrozenRef block = std::make_shared<FrozenBlock>(entries * 2u);
+  std::memset(block->bytes.get(), 0, entries * 2u);
+  rebind(t.data, std::move(block));
+  t.version = ++m_tlutClock;
+  ++m_stats.zeroTluts;
+  if (m_stats.zeroTluts <= 8) {
+    GCRT_TRACE(GCRT_TRACE_PLATFORM,
+               "GX: color-indexed texture %u reads TMEM 0x%03X, where no TLUT was loaded: palette of zeros, as in "
+               "Dolphin (frame %llu)",
+               map, tmemOffset, static_cast<unsigned long long>(m_stats.displayCopies + 1));
+  }
+  return slot;
+}
+
 // Fingerprint (FNV-1a 64) of the first 256 bytes at the destination of a copy: enough to see that the game loaded
 // other data there, without reaching beyond a small copy buffer (whose exact size in guest memory is not known here).
 uint64_t FifoBridge::copy_prefix_hash(uint32_t phys) const {
@@ -1324,9 +1459,9 @@ void FifoBridge::flush_textures() {
         }
       }
       if (slot < 0) {
-        GCRT_TRACE(GCRT_TRACE_UNHANDLED, "GX: color-indexed texture %u without a loaded TLUT (TMEM 0x%03X)",
-                   map, tmem);
-      } else {
+        slot = zero_tlut_slot(tmem, fmt, map);
+      }
+      {
         const auto& t = m_tluts[static_cast<size_t>(slot)];
         write_aurora_header(AUR_LOAD_TLUT);
         out_u8(static_cast<uint8_t>(slot));
@@ -1508,6 +1643,19 @@ size_t FifoBridge::on_draw(const uint8_t* p, size_t avail) {
   if (n == 0 || vsize == 0) {
     ++m_stats.skippedDraws;
     GCRT_TRACE(GCRT_TRACE_GX, "draw skipped (op 0x%02X, %u vertices, size %u)", op, count, vsize);
+    return total;
+  }
+
+  if (!m_dumpDraws.empty() && m_streamLog != nullptr) {
+    for (const auto& d : m_dumpDraws) {
+      if (d[0] == m_streamFrame && d[1] == m_streamDraws) {
+        dump_draw(p, n, vsize);
+      }
+    }
+  }
+  if (!m_skipDraws.empty() && m_streamLog != nullptr && skip_draw()) {
+    ++m_stats.skippedDraws;
+    ++m_streamDraws;
     return total;
   }
 
