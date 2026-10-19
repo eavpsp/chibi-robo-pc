@@ -103,26 +103,37 @@ py -3 tools/installer/build.py chibi-robo     # -> build/installer/chibi-robo-pc
 
 By default it takes `build/chibi-robo-<ID>-Release` for every version that is built (`--build ID=DIR` to choose).
 One installer holds both versions; the player's image selects which executable is installed. `--no-disc-arg` makes
-the shortcuts start the game without `--disc` (executables that find `disc/` next to themselves). `dxil.dll` is not
-shipped (`--include-dxil` to ship it): without it, Dawn uses its Vulkan backend instead of Direct3D 12. This was
-checked on the development machine only (title-screen captures identical with and without it); a PC without a Vulkan
-driver has not been tested.
+the shortcuts start the game without `--disc` (executables that find `disc/` next to themselves). Neither
+`dxcompiler.dll` nor `dxil.dll` is needed or shipped: Direct3D 12 compiles its shaders with FXC (Aurora patch 0006,
+see "Credits and third-party software"). That was checked on the development machine only; a PC where `d3dcompiler_47.dll`
+is missing, or without a GPU, has not been tested.
 `tools/installer/notices.py` regenerates `THIRD_PARTY_LICENSES.txt` from the real licence files (the build checks
 that the committed copy is up to date).
 
-What the player does: run the installer, choose the installation folder (per user, no administrator rights; a new or
-empty folder, or an earlier installation of this installer: a folder that holds other files is refused, so that
-nothing of the player's is overwritten or later uninstalled), choose their own `.iso` / `.gcm` dump. The image is checked (SHA-1 against `game.toml`); compressed formats (RVZ, WIA,
+What the player does: run the installer, choose the installation folder (per user, no administrator rights; a path
+of ASCII characters only; a new or empty folder, or an earlier installation of this installer: a folder that holds
+other files is refused, so that nothing of the player's is overwritten or later uninstalled), choose their own `.iso` / `.gcm` dump. The image is checked (SHA-1 against `game.toml`); compressed formats (RVZ, WIA,
 GCZ, CISO, NKit), modified or unknown dumps are refused with an explanation. The image is copied into the
 installation folder as `game.iso`, `sys/` is extracted next to it, and a Start menu shortcut is created
 (desktop shortcut optional). Uninstalling removes only the files the installer put there and the game's GPU cache
 (a folder that still holds other files is kept): saves and settings stay in
 `%APPDATA%\Chibi Robo PC\Chibi Robo`. Running the installer again over an existing installation updates it (the
-image already installed is offered and not copied again); if the new image or extraction fails, the previous
-installation is kept as it was. Silent install:
-`setup.exe /SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=<folder> /IMAGE=<image.iso>` (exit code 0 on success,
-1 if the image or the folder is refused, 7 if the image could not be extracted, 9 if its copy could not be checked;
-a previous installation is kept in all these cases).
+image already installed is offered and not copied again). What happens when an installation does not complete:
+- the new image is refused, or its extraction or the check of its copy fails: a previous installation keeps its
+  files (its disc image, `disc/` and `manifest.json` are put back if they had already been replaced);
+- Setup is cancelled, or stopped by an error, while it installs the program files: the previous disc image, `disc/`
+  and `manifest.json` are put back, but an executable or DLL that Setup had already replaced is not (Inno Setup's
+  rollback does not restore overwritten files): run the installer again to repair the installation;
+- a first installation into a new folder that does not complete in any of these ways leaves nothing behind: the
+  folder is removed, with no uninstaller and no Programs-list entry;
+- after a power loss or a crash during the installation, nothing is guaranteed: run the installer again over the
+  same folder, which puts back or finishes an interrupted replacement of the image files and repairs the
+  installation (a first installation interrupted that way has no uninstaller yet).
+
+Silent install: `setup.exe /SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=<folder> /IMAGE=<image.iso>` (exit
+code 0 on success, 1 if the image or the folder is refused, 7 if the image could not be extracted or the folder is
+refused at the last check, 9 if its copy could not be checked or put in place, 5 if the installation was cancelled or
+stopped by a file error).
 
 The build recompiles the game with DolRecomp, then compiles it with clang-cl. The first build in each build folder
 (`build/<game>-<ID>-<config>`) needs an internet connection: CMake downloads Aurora's dependencies into it (prebuilt
@@ -134,7 +145,7 @@ speakers).
 
 ### Setup menu
 
-A direct launch opens a small setup menu first: window size, fullscreen and render scale (Enter or "Start game"
+A direct launch opens a small setup menu first: window size, fullscreen, render scale and graphics backend (Enter or "Start game"
 starts the game; launches by the project's tools never show it; `GCRT_SETUP_MENU=0` disables it, `=1` forces
 it). The choices are
 saved in `game_config.ini` in the same folder as `controls.ini` (see below). Tick "Skip this menu next time"
@@ -148,6 +159,20 @@ so the output follows the prompt). The choice is saved as `console=1` or `consol
 `game_config.ini`; with "Skip this menu next time", the saved value applies. `--console` and `--no-console` decide
 for one launch only: the box starts checked or unchecked and the file is changed only if you toggle the box. When the
 output is redirected (to a file or a pipe, as `tools/run.py` and the test benches do), no console is ever opened.
+
+**Graphics backend.** The menu's "Graphics backend" list offers Auto (the default), Direct3D 12 and Vulkan, saved as
+`backend=auto|d3d12|vulkan` in `game_config.ini`. The window is already open when the menu shows, so a change applies
+the next time the game starts. `--backend d3d12|vulkan|auto` or `GCRT_BACKEND` choose for one launch only (not saved).
+Auto uses Direct3D 12, with Vulkan as the alternative. Direct3D 12 compiles its shaders with FXC
+(`d3dcompiler_47.dll`, taken from the Windows system folder; present on the development machine, not established on
+every Windows), so no extra DLL is needed next to the executable. If the backend asked for cannot start, Aurora goes on
+by itself with its own order (Direct3D 12, Vulkan, then its last resorts Direct3D 11 and null), and the game says so on
+stderr and in the trace. A PC without a usable GPU (software adapter only) has not been tested. An unknown name falls
+back to Auto with a message. On the development machine, Direct3D 12 and Vulkan give the same picture up to tiny
+rounding differences: the title-boot captures of both versions are identical, and in some 3D scenes Vulkan differs by
+1 or 2 colour levels on at most 0.05 % of the pixels. Direct3D 11 is not offered: Dawn starts it, but its picture
+differs on the US version. The trace line `graphics backend: ... in use, requested ...` and crash reports name the
+backend actually used.
 
 ### Controls
 
@@ -279,12 +304,16 @@ line.
 - [DolRecomp](https://github.com/ExpansionPak/DolRecomp) (GPL-3.0) — static recompiler from PowerPC to C. A small
   patch is kept in `tools/patches/dolrecomp/`.
 - [Aurora](https://github.com/encounter/aurora) (MIT) — GameCube/Wii compatibility layer (GX, input) and its
-  dependencies (Dawn, SDL3 and others, under their own licenses). Three small patches are kept in
+  dependencies (Dawn, SDL3 and others, under their own licenses). Small patches are kept in
   `tools/patches/aurora/` and applied by `tools/build.py`: the first lets the render target be taller than the
   displayed image (the console's 528-line EFB); the second snaps the viewport, scissor and copy edges to whole
   target pixels, so that a non-integer window scale does not leave a black line at the bottom of the shadow map;
   the third moves the buffer of very large texture uploads (more than 24 MiB in one frame) from the game thread to
   Aurora's render worker, so that creating and unmapping it no longer races with the worker on the Dawn device.
+  Patch 0006 turns off Dawn's `use_dxc` toggle: the Direct3D 12 backend compiles its shaders with FXC
+  (`d3dcompiler_47.dll`, found in the Windows system folder on the development machine; its presence on every
+  Windows, and in Windows Sandbox, is not established) instead of DXC, so `dxcompiler.dll` and `dxil.dll` are neither
+  needed nor copied next to the executable.
 - [Dear ImGui](https://github.com/ocornut/imgui) (MIT), through Aurora — the setup menu.
 - [Dolphin](https://github.com/dolphin-emu/dolphin) (GPL-2.0-or-later) — reference for the original behavior;
   its AX audio voice processing is ported in `runtime/core/audio/`, with attribution in each file.
