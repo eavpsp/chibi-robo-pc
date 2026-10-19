@@ -75,6 +75,55 @@ py -3 tools/build.py chibi-robo                      # -> build/chibi-robo-GGTP0
 py -3 tools/build.py chibi-robo --version GGTE01
 ```
 
+`tools/gcextract/` is a native, dependency-free version of the extraction (C++, for the player installer, which
+cannot rely on Python). It gives the same `disc/` tree, byte for byte, and refuses images that are not listed in
+`game.toml`:
+
+```
+py -3 tools/gcextract/build.py                       # -> build/gcextract/gcextract.exe
+build\gcextract\gcextract.exe <image.iso> <output folder> --game-toml games/chibi-robo/game.toml --u8 files/qp.bin
+```
+
+Only uncompressed `.iso` / `.gcm` images are read. Exit codes: 2 usage, 3 read error, 4 not a GameCube image, 5 image
+not listed in `game.toml`, 6 inconsistent data or unsafe file name in the image, 7 write error or existing output
+(nothing is ever deleted: after a failure, remove the output folder before retrying).
+
+### Installer
+
+`tools/installer/` builds a Windows installer for players (Inno Setup 6, free: `winget install
+JRSoftware.InnoSetup`). It contains the game executable of each version, its DLLs, the Visual C++ runtime DLLs,
+`gcextract.exe`, `game.toml` and `THIRD_PARTY_LICENSES.txt`, and no game data. The game executable contains this
+project's runtime (GPL-3.0), third-party code (listed with its licences in `THIRD_PARTY_LICENSES.txt`) and the
+recompiled game code, which is derived from the original game and is not licensed by this project:
+
+```
+py -3 tools/gcextract/build.py
+py -3 tools/installer/build.py chibi-robo     # -> build/installer/chibi-robo-pc-setup-<commit>.exe
+```
+
+By default it takes `build/chibi-robo-<ID>-Release` for every version that is built (`--build ID=DIR` to choose).
+One installer holds both versions; the player's image selects which executable is installed. `--no-disc-arg` makes
+the shortcuts start the game without `--disc` (executables that find `disc/` next to themselves). `dxil.dll` is not
+shipped (`--include-dxil` to ship it): without it, Dawn uses its Vulkan backend instead of Direct3D 12. This was
+checked on the development machine only (title-screen captures identical with and without it); a PC without a Vulkan
+driver has not been tested.
+`tools/installer/notices.py` regenerates `THIRD_PARTY_LICENSES.txt` from the real licence files (the build checks
+that the committed copy is up to date).
+
+What the player does: run the installer, choose the installation folder (per user, no administrator rights; a new or
+empty folder, or an earlier installation of this installer: a folder that holds other files is refused, so that
+nothing of the player's is overwritten or later uninstalled), choose their own `.iso` / `.gcm` dump. The image is checked (SHA-1 against `game.toml`); compressed formats (RVZ, WIA,
+GCZ, CISO, NKit), modified or unknown dumps are refused with an explanation. The image is copied into the
+installation folder as `game.iso`, `sys/` is extracted next to it, and a Start menu shortcut is created
+(desktop shortcut optional). Uninstalling removes only the files the installer put there and the game's GPU cache
+(a folder that still holds other files is kept): saves and settings stay in
+`%APPDATA%\Chibi Robo PC\Chibi Robo`. Running the installer again over an existing installation updates it (the
+image already installed is offered and not copied again); if the new image or extraction fails, the previous
+installation is kept as it was. Silent install:
+`setup.exe /SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=<folder> /IMAGE=<image.iso>` (exit code 0 on success,
+1 if the image or the folder is refused, 7 if the image could not be extracted, 9 if its copy could not be checked;
+a previous installation is kept in all these cases).
+
 The build recompiles the game with DolRecomp, then compiles it with clang-cl. The first build in each build folder
 (`build/<game>-<ID>-<config>`) needs an internet connection: CMake downloads Aurora's dependencies into it (prebuilt
 Dawn and SDL3 packages and ten source libraries); later builds in the same folder reuse them.
@@ -140,9 +189,12 @@ folder is known. Only the 5 most recent reports are kept. A report has three fil
 - `crash-<date>-<time>-<pid>.dmp` (minidump) and `crash-<date>-<time>-<pid>-guest-ram.bin` (game memory): they
   contain game data and local paths. **Never publish them**; if a developer asks for them, send them privately.
 
-If the game stops progressing for 60 seconds (a freeze), a `hang-<date>-<time>-<pid>.txt` report (and `.dmp`) is
-written in the same folder while the game keeps running; `GCRT_WATCHDOG=<seconds>` changes the delay (`0` turns it
-off).
+If the game loop stops progressing for 60 seconds (a freeze), a `hang-<date>-<time>-<pid>.txt` report is written in
+the same folder, followed by a `.dmp` if the game is still stopped by then. The game is not killed, but it is paused
+while the report copies the state of its threads (at most a few seconds) and while the `.dmp` is written.
+`GCRT_WATCHDOG=<seconds>` changes the delay (`0` turns off both watchdogs). The start-up (window, setup menu, game
+boot up to its first frame) is watched too, with `GCRT_WATCHDOG_STARTUP=<seconds>` (default: `GCRT_WATCHDOG`, at
+least 60; `0` turns it off); a start-up report is a `.txt` only, never a `.dmp`.
 
 `GCRT_CRASH_DIR` chooses another folder. For developers, `tools/crash_inspect.py <report.dmp>` decodes the faulting
 instruction of a minidump, checks whether it explains the fault and lists the memory regions, the threads and the
@@ -173,7 +225,7 @@ in `games/chibi-robo/game.toml`
 - `games/chibi-robo/` — everything specific to Chibi-Robo!: game description (`game.toml`), recompiler
   configuration and hooks, symbol maps, reference scenarios.
 - `tools/` — generic scripts: environment check, tool installation, extraction, build, run, A/B comparison,
-  Dolphin reference capture, PGO.
+  Dolphin reference capture, PGO, safe removal of worktrees that contain junctions (`tools/worktree.py`).
 - `orig/`, `generated/`, `external/`, `build/` — your disc image, locally generated files, third-party tools and
   build outputs. Never committed.
 
@@ -182,15 +234,18 @@ published.
 
 ## Distribution policy
 
-Only the fully decompiled C++ version will ever be published as a ready-to-use installer (roadmap stage 2,
-milestone D3). It will ship a precompiled executable that contains no game data, and players will still provide
-their own disc image. Until then, the game can only be built locally from your own copy, as described above.
+A ready-to-use installer (see "Installer" above) will be published as a GitHub release once it has passed the
+project's review and a test on a clean Windows (decision of the project owner, 2026-10-19; no release exists yet).
+It ships the recompiled executable and its libraries, never any game data: players provide their own disc image.
+The fully decompiled C++ version (roadmap stage 2, milestone D3) will later replace the recompiled executable in it.
+You can always build the game locally from your own copy, as described above.
 
 ## License
 
 The repository is licensed under **GPL-3.0** (see `LICENSE`), with the exceptions below. Licenses cover the code
 and documents of this repository only, not the game or its data. Code generated by DolRecomp relies on its CPU
-runtime (GPL-3.0).
+runtime (GPL-3.0). A game executable built from this repository also contains the recompiled game code, derived from
+the original game: that part is not licensed by this project.
 
 To make reuse easy for other Chibi-Robo! projects (decompilations, research, tools), some parts are offered under
 more permissive terms:
@@ -209,7 +264,7 @@ See also **[RESEARCH.md](games/chibi-robo/RESEARCH.md)** for our findings about 
 REL modules, SDK libraries, identified functions and engine behavior.
 
 *Chibi-Robo!* is a trademark of its respective owners. This project is not affiliated with or endorsed by
-Nintendo or skip Ltd. It contains no game code or assets, and requires a legally obtained copy of the game.
+Nintendo or skip Ltd. This repository contains no game code or assets, and requires a legally obtained copy of the game.
 
 ## Development
 
@@ -224,10 +279,12 @@ line.
 - [DolRecomp](https://github.com/ExpansionPak/DolRecomp) (GPL-3.0) — static recompiler from PowerPC to C. A small
   patch is kept in `tools/patches/dolrecomp/`.
 - [Aurora](https://github.com/encounter/aurora) (MIT) — GameCube/Wii compatibility layer (GX, input) and its
-  dependencies (Dawn, SDL3 and others, under their own licenses). Two small patches are kept in
+  dependencies (Dawn, SDL3 and others, under their own licenses). Three small patches are kept in
   `tools/patches/aurora/` and applied by `tools/build.py`: the first lets the render target be taller than the
   displayed image (the console's 528-line EFB); the second snaps the viewport, scissor and copy edges to whole
-  target pixels, so that a non-integer window scale does not leave a black line at the bottom of the shadow map.
+  target pixels, so that a non-integer window scale does not leave a black line at the bottom of the shadow map;
+  the third moves the buffer of very large texture uploads (more than 24 MiB in one frame) from the game thread to
+  Aurora's render worker, so that creating and unmapping it no longer races with the worker on the Dawn device.
 - [Dear ImGui](https://github.com/ocornut/imgui) (MIT), through Aurora — the setup menu.
 - [Dolphin](https://github.com/dolphin-emu/dolphin) (GPL-2.0-or-later) — reference for the original behavior;
   its AX audio voice processing is ported in `runtime/core/audio/`, with attribution in each file.

@@ -21,10 +21,12 @@ one has been validated.
 
 From stage 3 onwards, every stage must keep multiplayer working (automated two-instance test).
 
-**Release policy.** The only public release will be the fully decompiled C++ version (stage 2, milestone D3): an
-installer with a precompiled executable that contains no game data, which asks for the player's own disc image.
-Nothing is compiled on the player's machine. Until then, the game can only be built locally (see the
-[README](README.md)).
+**Release policy.** The player installer of milestone 11 (decision of the project owner, 2026-10-19) will be
+published as a GitHub release once it has passed the review and a test on a clean Windows: it contains the
+recompiled executable and its libraries but no game data, asks for the player's own disc image, and compiles
+nothing on the player's machine. No release has been created yet. The fully decompiled C++ version (stage 2,
+milestone D3) will later replace the recompiled executable in that installer. The game can also be built locally
+(see the [README](README.md)).
 
 ## Stage 1 — Faithful native port, with no emulated hardware 🟡
 
@@ -39,13 +41,13 @@ that touches the hardware is replaced, identified by signature, with a native im
 | 2 | Loading | ✅ | DOL and the 16 REL modules extracted, loaded into DolRecomp and Ghidra. |
 | 3 | Recompilation | ✅ | Whole game recompiled to C, builds without errors. |
 | 4 | Minimal runtime | ✅ | Window, main loop, keyboard and gamepads. |
-| 5 | Rendering | ✅ | PAL: the five boot screens, from the 50/60 Hz prompt to the title screen, match Dolphin captures above the documented SSIM threshold. US: only the health and safety warning has been compared with Dolphin. |
-| 6 | Audio | 🟡 | Music and effects work. Title music matches Dolphin (peak and RMS); still to do: intro and US comparison against Dolphin, and a listening test. |
+| 5 | Rendering | ✅ | PAL: the five boot screens, from the 50/60 Hz prompt to the title screen, match Dolphin captures above the documented SSIM threshold. US: the health and safety warning was compared first; the logos, title screen, file menus, loading screen, party, living room and backyard were compared later (milestone 9). |
+| 6 | Audio | 🟡 | Music and effects work. On the title screen, the party and the living room (PAL and US) the music has the same content as in Dolphin at a constant offset (matched block by block, many blocks identical to the sample) and it loops with the same period; the differences that remain are listed under "Known differences with Dolphin". The credits video has the same duration and the same sound in 99.8 to 99.9 % of the 5 ms blocks. Still to do: the other video cutscenes and a listening test. |
 | 7 | Saves | ✅ | Native PC saves: card always inserted, crash-safe writes (temporary file, then rename). |
-| 8 | Playable game | 🟡 | Scripted play sessions of up to 50 minutes from late saves run without a crash; open issues from player reports are listed under "Known issues". |
-| 9 | Comparison with Dolphin | ⬜ | Key scenes compared; differences listed. |
+| 8 | Playable game | 🟡 | Scripted play sessions of up to 50 minutes from late saves run without a crash; the prologue (new game through the birthday party), the first save, and the first load and unload of a REL module (`stage07.rel`, Chibi-House to living room and back) are replayed with scripted inputs on both US and PAL, three identical replays per version; open issues from player reports are listed under "Known issues". |
+| 9 | Comparison with Dolphin | 🟡 | Images of the key scenes (boot screens, title, menus, loading, party, living room, backyard) compared with Dolphin in PAL and US: above the SSIM threshold except for the cases explained under "Known differences with Dolphin". The credits video is compared (PAL: SSIM 0.937 to 0.95 because Dolphin dumps it at another height); the other video cutscenes are not compared yet. |
 | 10 | No emulated hardware | ✅ | See below. |
-| 11 | Installer (private) | ⬜ | Disc check, extraction, install and uninstall, tested on a clean Windows. It stays private until the C++ version exists. |
+| 11 | Player installer | 🟡 | Inno Setup installer (`tools/installer/`): the player picks their own disc image, checked by SHA-1 against `game.toml` and refused with a clear message otherwise; per-user install without administrator rights, progress bar, shortcut, uninstall that keeps saves and settings, reinstall to update. Installed and run to the title screen on US and PAL from a developer machine with no development tools in `PATH`. `dxil.dll` is not shipped (redistribution terms under review): without it Dawn uses Vulkan instead of Direct3D 12, checked on the development machine only (identical captures); a PC without a Vulkan driver is untested. The clean-Windows test and the review are pending, then publication as a GitHub release. |
 
 ### Milestone 10 — no emulated hardware ✅
 
@@ -71,6 +73,10 @@ Result, checked automatically for both versions:
   removed (2026-10-13), and for a rare one-pixel difference of the US version near a loading screen, which came
   from the rendering race below (fixed). The save scenarios were recorded again at step 10b, because save dates now come
   from the console clock.
+- the last two alignments with the emulated build were removed on 2026-10-19: the audio events are plain native
+  timers in time base ticks, and interrupts due at the same moment are delivered in the order of the SDK priority
+  table, like the console. Images, audio and saves of the five bench scenarios stayed the same, byte for byte, in
+  both versions.
 
 Performance in the heaviest scene measured so far (the birthday party), as frame time:
 
@@ -93,14 +99,10 @@ Performance in the heaviest scene measured so far (the birthday party), as frame
    one-pixel gap, and late reads probably gave it other colors. Since the fix, 30 to 32 runs with three output-path
    lengths gave the same frames byte for byte; the native references, recorded before the fix, hold a different
    color for that pixel (the bench does not compare these neighbouring frames).
-3. **Remove the last compatibility shims of milestone 10.** They exist only to stay bit-identical with the old
-   emulated build: a cycle-dated audio event queue and an interrupt delivery order. Removing them changes the
-   outputs, so the native reference recordings will be made again. The boot-cycle offset is already gone: since
-   2026-10-13 every reference recording of the bench is native.
-4. **Milestone 8**: input scenarios that play through the first level, real REL loading paths.
-5. **Milestone 9**: key-scene comparison with Dolphin.
-6. **Milestone 11**: the private installer.
-7. Phase review, then validation by the project owner.
+3. **Milestone 8**: input scenarios that play through the first level, real REL loading paths.
+4. **Milestone 9**: key-scene comparison with Dolphin.
+5. **Milestone 11**: the player installer (clean-Windows test, review, then GitHub release).
+6. Phase review, then validation by the project owner.
 
 ## Stage 2 — Full decompilation ⬜
 
@@ -112,7 +114,7 @@ and assets are read from the player's files.
 |---|---|---|
 | D1 | Tooling | Mixed executable (decompiled and recompiled functions side by side), oracle, progress tracking |
 | D2 | Batches | Decompile batch by batch (by unit or REL), each one checked by the oracle |
-| D3 | No recompiled code, no virtual CPU | 100 % decompiled; DolRecomp no longer needed; the game runs on the PC clock. **First public release**: lightweight installer with a precompiled executable |
+| D3 | No recompiled code, no virtual CPU | 100 % decompiled; DolRecomp no longer needed; the game runs on the PC clock. **First release of the C++ version**: the installer ships the decompiled executable instead of the recompiled one |
 | D4 | Native memory | Native types, pointers and byte order; the 24 MB guest RAM disappears |
 | D5 | No GameCube GPU commands | Models converted to native geometry; no GX command stream decoded at run time |
 
@@ -146,6 +148,37 @@ and assets are read from the player's files.
 | M6 | C++ plugins with a stable, versioned C API |
 | M7 | Lua scripts in a sandbox |
 | M8 | Documentation and example mods for modders |
+
+## Known differences with Dolphin
+
+Measured on the native build against Dolphin 5.0 (same inputs, scenes aligned by content). None of them is a
+rendering or sound defect of the port that we know of; most come from the game's own random numbers or from the
+timing of the simulated disc.
+
+- **Disc timing.** The native disc model has no seek time. Verified: the silence the game leaves at the loop point of
+  the title music follows the simulated disc speed, and it is 60 to 85 ms shorter than in Dolphin, which simulates a
+  seek. Loading is also 2 to 3.6 times faster in the port, probably for the same reason. Which model is closer to the
+  real console is unknown; a seek-time model could be added as an option.
+- **Random sounds and animations.** Verified: the background of the title screen depends on the game's random
+  generator (with the same seed on both sides the title scores 0.990 to 0.996 in SSIM), and so do the backyard
+  ambient sounds, which depend on what happened before the scene. With the same generator state on both sides the US
+  backyard plays the same sounds at the same instants (72 of 118 anchors identical to the sample, one periodic sound
+  5 ms off); in PAL the gap is strongly reduced but only partly analysed. The ambient sounds of the living room still
+  differ in small ways whose cause is not established. For the first seconds of the party, the random generator state
+  was forced to the same value on both sides when the party module is loaded (US and PAL): the captured images and
+  the audio did not change, so the random generator is not the cause there. The cause is not established; the
+  remaining candidates are the game clock and the moment the loading ends.
+- **Menus.** The scrolling background and the bouncing letters of the file menus are not in the same phase as in
+  Dolphin; text and frames are identical. The cause is not established (probably an animation tied to the time since
+  start-up).
+- **Stretched viewport.** In the default `stretch` window mode the 3D image scores about 0.015 lower in SSIM than
+  with `fit`; probably resampling, since Dolphin's frames are resized to compare them.
+- **Video (credits).** Compared in both versions: same duration, and the sound is bit-identical in 99.8 to 99.9 % of
+  the 5 ms blocks; both sides insert a few very short runs of zero samples (at most 1.2 ms) at different moments.
+  In PAL the picture scores 0.937 to 0.95 in SSIM with the same picture and geometry; the gap is probably resampling
+  (Dolphin dumps it at 640x468 instead of 640x528).
+- **Not measured yet:** the other video cutscenes (a robot cutscene in the basement, whose conditions are known only
+  from the stage script).
 
 ## Known issues
 

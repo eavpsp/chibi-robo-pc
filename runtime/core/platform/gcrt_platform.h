@@ -4,7 +4,9 @@
  * audio output, the screenshots and the run log.
  *
  * Generic GameCube. Settings through environment variables (tools/run.py fills them in):
- *   GCRT_DATA_DIR      Aurora data folder (default: <executable folder>/gcrt-data)
+ *   GCRT_DATA_DIR      Aurora data folder: pipeline and shader caches, imgui.ini (default: <executable
+ *                      folder>/gcrt-data if a file can be created there, otherwise <user folder>/gcrt-data, e.g. for
+ *                      a copy installed in a read-only folder; notes/decisions.md, 2026-10-19)
  *   GCRT_USER_DIR      user folder of the tests and automated runs, instead of the SDL one: controls.ini
  *                      inside, saves in <folder>/saves/ (platform/gcrt_user_dir.h)
  *   GCRT_INPUT_KEYS    simulated physical keys, before translation by controls.ini (input_host.hpp)
@@ -126,13 +128,17 @@
  *                      heaplock (fault while the game thread holds the process heap lock), hangheap (the game thread
  *                      holds the heap lock for GCRT_CRASH_TEST_HANG seconds, then faults: hang report, then crash
  *                      report), hang (the game thread stops for GCRT_CRASH_TEST_HANG seconds, default 15, then goes on: test of
- *                      the watchdog). GCRT_CRASH_TEST_SUSPENDED=<ms>|heap: what a report does while the other threads
- *                      are suspended (sleep, or a 1 MiB allocation on the process heap): test of the suspension guard
- *                      (GCRT_CRASH_SUSPEND_LIMIT, platform/gcrt_crash.h)
+ *                      the watchdog). GCRT_CRASH_TEST_SUSPENDED=<ms>|heap|fault: what a report does while the other
+ *                      threads are suspended (sleep, a 1 MiB allocation on the process heap, or a fault of the
+ *                      reporting thread): test of the suspension guard (GCRT_CRASH_SUSPEND_LIMIT, platform/gcrt_crash.h)
+ *                      and of the cut report
  *   GCRT_WATCHDOG      seconds without progress of the game loop (one heartbeat per emulated frame) before a hang
  *                      report (hang-*.txt/.dmp in the crash folder, threads and their stacks); default 60, 0 = off;
- *                      at most 3 per session, never kills the game, skipped under a debugger (platform/gcrt_crash.h)
- *   GCRT_DIAG_EVENTS   size of the ring of recent native events kept for crash reports (frames, copies, disc reads,
+ *                      at most 3 per session, never kills the game, skipped under a debugger, not during the exit
+ *                      (platform/gcrt_crash.h); the start-up is watched too (GCRT_WATCHDOG_STARTUP, text only)
+ *   GCRT_WATCHDOG_STARTUP  the same before the game loop starts: seconds without progress of the start-up (window
+ *                      creation, one beat per setup menu pass); default GCRT_WATCHDOG, at least 60; 0 = off
+ *   GCRT_DIAG_EVENTS  size of the ring of recent native events kept for crash reports (frames, copies, disc reads,
  *                      save files, window events, settings, DSP tasks; platform/gcrt_diag.h): rounded up to a power of
  *                      two, default 4096, 0 = off
  *   GCRT_GUEST_HISTORY last guest blocks kept for crash reports (cpu/gcrt_cpu.h): power of two from 64 to 1048576,
