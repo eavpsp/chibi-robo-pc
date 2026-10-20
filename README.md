@@ -11,10 +11,46 @@ extract, recompile and build everything locally from that image.
 
 Project status and plans: **[ROADMAP.md](ROADMAP.md)**.
 
+## Table of contents
+
+- [Download and install (Windows, for players)](#download-and-install-windows-for-players)
+- [Current state (October 2026)](#current-state-october-2026)
+- [Supported versions](#supported-versions)
+- [Requirements to build from source (Windows)](#requirements-to-build-from-source-windows)
+- [Getting started](#getting-started)
+  - [Installer](#installer)
+  - [Setup menu](#setup-menu)
+  - [Controls](#controls)
+  - [Optional: profile-guided optimization](#optional-profile-guided-optimization)
+  - [Crash reports](#crash-reports)
+  - [Starting in a chosen stage (testing)](#starting-in-a-chosen-stage-testing)
+- [Repository layout](#repository-layout)
+- [Distribution policy](#distribution-policy)
+- [License](#license)
+- [Development](#development)
+- [Credits and third-party software](#credits-and-third-party-software)
+
+## Download and install (Windows, for players)
+
+Get the installer from the **[latest release](https://github.com/Armandpro12/chibi-robo-pc/releases/latest)**
+(`chibi-robo-pc-setup-<version>.exe`, about 31 MB) and check its SHA-256 against `SHA256SUMS.txt` on the same page.
+Run it and pick **your own disc image** of the game (US or PAL; an uncompressed `.iso` or `.gcm` file: other formats
+must be converted first, for example with Dolphin). The installer checks the image, copies it into the installation
+folder (about 1.5 GB in total), and installs per user, without administrator rights. Uninstalling removes only what
+the installer put there; your saves and settings stay in your user folder.
+
+Needs a 64-bit Windows and a graphics driver with Direct3D 12 or Vulkan. It was developed and tested on one machine
+(Windows 11, NVIDIA graphics). **Not tested yet**: a clean Windows (including Windows Sandbox), Windows 10, other
+graphics hardware, a PC without a GPU (no software-renderer fallback yet), and playing through the whole game. See the
+release notes for the known problems, and please report any crash with its `crash-*.txt` report only, after reading
+it (see "Crash reports" below: the other files of a report hold game memory and must not be shared).
+
 ## Current state (October 2026)
 
-- Runs on Windows from boot through the title screen, a new game, the 3D intro and the first party scene, with
-  music and sound effects, in real time.
+- Runs on Windows, in real time with music and sound effects, from boot through the title screen, a new game, the
+  prologue up to and including the birthday party, the first save, and the first exit from the Chibi-House with the
+  first module load and unload, on both versions. Scripted game sessions run without a crash: 50 game minutes from a
+  late save (US) and 30 minutes from a new game (PAL).
 - Native saves, like a PC game: a memory card is always inserted; save files (`.gci`, Dolphin-compatible) live in
   `%USERPROFILE%\Saved Games\Chibi Robo PC\Chibi Robo\`.
 - Configurable keyboard and gamepads (`controls.ini`, see below).
@@ -22,10 +58,12 @@ Project status and plans: **[ROADMAP.md](ROADMAP.md)**.
   and the US versions. The bench references and the regression tests live in a local `tests/` folder that is not
   published (it holds output of the game), so these checks cannot be rerun as is from this repository;
   `tools/ab.py record` records references from your own build.
-- Compared with Dolphin only in part: in PAL, the five boot screens up to the title screen and the title music;
-  in the US version, only the health and safety warning screen. No audio measurement against Dolphin yet for the
-  US version.
-- Not yet verified: playing through the whole game (milestone 8 of the roadmap).
+- Compared with Dolphin on the key scenes, in both versions: images of the boot screens, title screen, menus,
+  loading screen, birthday party, living room and backyard, and the sound of the title screen, party, living room and
+  backyard (music loops checked). Known differences are listed in the ROADMAP ("Known differences with Dolphin").
+  Only the credits video is compared so far.
+- Not yet verified: playing through the whole game (milestone 8 of the roadmap), the other video cutscenes,
+  listening and playing by a human, and a clean Windows (milestone 11).
 
 ## Supported versions
 
@@ -37,7 +75,7 @@ Project status and plans: **[ROADMAP.md](ROADMAP.md)**.
 Accepted image formats: `.iso` / `.gcm` directly; `.rvz`, `.gcz`, `.wia`, `.ciso` after automatic conversion with
 DolphinTool.
 
-## Requirements (Windows)
+## Requirements to build from source (Windows)
 
 Install yourself: Git, Python 3.11+ (the `py` launcher), CMake 3.25+, and Visual Studio 2022 with the
 "Desktop development with C++" workload (Windows SDK and runtime libraries).
@@ -115,25 +153,56 @@ of ASCII characters only; a new or empty folder, or an earlier installation of t
 other files is refused, so that nothing of the player's is overwritten or later uninstalled), choose their own `.iso` / `.gcm` dump. The image is checked (SHA-1 against `game.toml`); compressed formats (RVZ, WIA,
 GCZ, CISO, NKit), modified or unknown dumps are refused with an explanation. The image is copied into the
 installation folder as `game.iso`, `sys/` is extracted next to it, and a Start menu shortcut is created
-(desktop shortcut optional). Uninstalling removes only the files the installer put there and the game's GPU cache
-(a folder that still holds other files is kept): saves and settings stay in
+(desktop shortcut optional). Uninstalling removes only the files the installer put there and the game's GPU cache,
+then the installation folder if nothing else is left in it (also when it was an empty folder that existed before
+the installation; a folder that still holds other files is kept): saves and settings stay in
 `%APPDATA%\Chibi Robo PC\Chibi Robo`. Running the installer again over an existing installation updates it (the
-image already installed is offered and not copied again). What happens when an installation does not complete:
-- the new image is refused, or its extraction or the check of its copy fails: a previous installation keeps its
-  files (its disc image, `disc/` and `manifest.json` are put back if they had already been replaced);
-- Setup is cancelled, or stopped by an error, while it installs the program files: the previous disc image, `disc/`
-  and `manifest.json` are put back, but an executable or DLL that Setup had already replaced is not (Inno Setup's
-  rollback does not restore overwritten files): run the installer again to repair the installation;
-- a first installation into a new folder that does not complete in any of these ways leaves nothing behind: the
-  folder is removed, with no uninstaller and no Programs-list entry;
+image already installed is offered and not copied again). Free disk space is checked before anything is written:
+an update needs as much free space as a first installation (about 1.6 GB), because the previous disc image is kept
+until the new copy is in place. What happens when an installation does not complete:
+- the new image is refused, there is not enough free space, or the extraction or the check of the copy fails, or
+  Setup is cancelled or stopped by an error while it installs the program files: a previous installation is kept
+  as it was (whatever Setup had already replaced is put back: the disc image, `disc/` and `manifest.json`, the
+  executable, its DLLs and `BUILD-INFO.txt`; Setup keeps each previous file as `<name>.old` until the installation is complete, because
+  Inno Setup's own rollback does not restore a file it has overwritten). So a failed update to the other version
+  (US to PAL, or the reverse) is not expected to leave an executable of one version with the disc image of the
+  other (tested with simulated failures only, see below; not tested with a real cancel, a locked file or a power
+  loss). Its Programs-list entry is not expected to change (Setup does not write it when the installation failed; only checked
+  in Setup's log so far, not in the registry). If a previous file cannot be put back (for example because it is
+  open in another program), Setup keeps it as `<name>.old` and says so when it stops with an error; if Setup was
+  cancelled or stopped in another way, the message may only be written to Setup's log. Run the installer again,
+  which puts it back first;
+- a first installation into a new or empty folder that does not complete in any of these ways leaves nothing
+  behind in that folder: the folder is removed if Setup created it (an empty folder that existed before is left in
+  place, empty), and so are the parent folders Setup created for it if they are empty; no uninstaller is left, and
+  no Programs-list entry is expected (Setup does not write it for a failed installation; only checked in Setup's log
+  so far);
 - after a power loss or a crash during the installation, nothing is guaranteed: run the installer again over the
-  same folder, which puts back or finishes an interrupted replacement of the image files and repairs the
-  installation (a first installation interrupted that way has no uninstaller yet).
+  same folder. While an installation is under way, the folder holds `setup-in-progress.txt` (deleted when it
+  completes, or when everything was put back). The next run puts back each previous file left as `<name>.old`:
+  when the file itself is missing, and also when both exist and `setup-in-progress.txt` is there (the file may have
+  been cut while being written, or belong to a half-made installation, so it is deleted: this brings back the
+  installation as it was before the interrupted run). Without `setup-in-progress.txt`, the run that left a
+  `<name>.old` had completed, so the file is kept and the `<name>.old` deleted. Then it repairs the installation (a
+  first installation interrupted that way has no uninstaller yet). Tested by simulating the files such an
+  interruption leaves, not with a real power loss.
+
+A folder that exists but cannot be listed (access denied) is refused like a folder that holds other files. An
+existing empty folder is accepted (tested: install, failed first installs, uninstall), and a folder that holds
+other files of the player is refused with nothing changed (tested).
+
+If the game cannot start because the installation is damaged, it shows a message box and exits instead of opening
+a black window: the disc image or `manifest.json` is missing or unreadable, the game files (`disc/sys/main.dol`,
+`boot.bin`) are missing, or the disc image or the game files are those of another version than the executable
+("This executable is for GGTE01 but the disc image is GGTP01"). The message names the file the game looked for; run
+the installer again over the same folder to repair it. Automated runs never get the box: the message goes to stderr
+(and the trace) and the exit code is 1 (`GCRT_FATAL_DIALOG`, see `runtime/core/platform/gcrt_fatal.h`).
 
 Silent install: `setup.exe /SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=<folder> /IMAGE=<image.iso>` (exit
-code 0 on success, 1 if the image or the folder is refused, 7 if the image could not be extracted or the folder is
-refused at the last check, 9 if its copy could not be checked or put in place, 5 if the installation was cancelled or
-stopped by a file error).
+code 0 on success, 1 if the image or the folder is refused, 7 if the image could not be extracted, the folder is
+refused at the last check, there is not enough free disk space or a previous file left by an interrupted run could not
+be put back, 9 if its copy could not be checked or put in place, 5 if the installation was cancelled or stopped by a
+file error).
 
 The build recompiles the game with DolRecomp, then compiles it with clang-cl. The first build in each build folder
 (`build/<game>-<ID>-<config>`) needs an internet connection: CMake downloads Aurora's dependencies into it (prebuilt
@@ -259,9 +328,9 @@ published.
 
 ## Distribution policy
 
-A ready-to-use installer (see "Installer" above) will be published as a GitHub release once it has passed the
-project's review and a test on a clean Windows (decision of the project owner, 2026-10-19; no release exists yet).
-It ships the recompiled executable and its libraries, never any game data: players provide their own disc image.
+A ready-to-use installer (see "Download and install" above) is published as a GitHub release (decision of the
+project owner, 2026-10-19). The first release, 0.1.0, was published before the test on a clean Windows and before a
+human installation test, which are still pending. The installer ships the recompiled executable and its libraries, never any game data: players provide their own disc image.
 The fully decompiled C++ version (roadmap stage 2, milestone D3) will later replace the recompiled executable in it.
 You can always build the game locally from your own copy, as described above.
 
@@ -304,16 +373,26 @@ line.
 - [DolRecomp](https://github.com/ExpansionPak/DolRecomp) (GPL-3.0) — static recompiler from PowerPC to C. A small
   patch is kept in `tools/patches/dolrecomp/`.
 - [Aurora](https://github.com/encounter/aurora) (MIT) — GameCube/Wii compatibility layer (GX, input) and its
-  dependencies (Dawn, SDL3 and others, under their own licenses). Small patches are kept in
+  dependencies (Dawn, SDL3 and others, under their own licenses). Seven small patches are kept in
   `tools/patches/aurora/` and applied by `tools/build.py`: the first lets the render target be taller than the
   displayed image (the console's 528-line EFB); the second snaps the viewport, scissor and copy edges to whole
   target pixels, so that a non-integer window scale does not leave a black line at the bottom of the shadow map;
   the third moves the buffer of very large texture uploads (more than 24 MiB in one frame) from the game thread to
-  Aurora's render worker, so that creating and unmapping it no longer races with the worker on the Dawn device.
-  Patch 0006 turns off Dawn's `use_dxc` toggle: the Direct3D 12 backend compiles its shaders with FXC
-  (`d3dcompiler_47.dll`, found in the Windows system folder on the development machine; its presence on every
-  Windows, and in Windows Sandbox, is not established) instead of DXC, so `dxcompiler.dll` and `dxil.dll` are neither
-  needed nor copied next to the executable.
+  Aurora's render worker, so that creating and unmapping it no longer races with the worker on the Dawn device;
+  the fourth sets a busy timeout on the SQLite connections of Aurora's pipeline and Dawn caches, so that two game
+  processes sharing one cache folder mostly wait for each other's locks instead of failing with "database is
+  locked" (hardening only: it is not a fix for the intermittent crash of issue 11); the fifth creates Aurora's
+  cached bind groups on the render worker instead of the GX command thread, which removes one identified race on
+  Dawn's unsynchronized D3D12 sampler descriptor cache (other Dawn calls, such as sampler and texture creation,
+  still happen on the GX thread, and the crash of issue 11 is not shown to be fixed); the sixth turns off Dawn's
+  `use_dxc` toggle: the Direct3D 12 backend compiles its shaders with FXC (`d3dcompiler_47.dll`, found in the
+  Windows system folder on the development machine; its presence on every Windows, and in Windows Sandbox, is not
+  established) instead of DXC, so `dxcompiler.dll` and `dxil.dll` are neither needed nor copied next to the
+  executable; the seventh requests Dawn's `ImplicitDeviceSynchronization` feature when the adapter offers it, so
+  that Dawn serializes the calls made on its device by the game thread, Aurora's GX FIFO processor and its render
+  worker with an internal lock (command encoding excepted; a warning is logged if the adapter does not offer the
+  feature; `AURORA_IMPLICIT_DEVICE_SYNC=0` leaves it off, for comparisons). It was measured to cost nothing visible on
+  the development machine and is not shown to fix issue 11 by itself.
 - [Dear ImGui](https://github.com/ocornut/imgui) (MIT), through Aurora — the setup menu.
 - [Dolphin](https://github.com/dolphin-emu/dolphin) (GPL-2.0-or-later) — reference for the original behavior;
   its AX audio voice processing is ported in `runtime/core/audio/`, with attribution in each file.
